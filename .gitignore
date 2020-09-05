@@ -2,3 +2,6 @@
 .ropeproject
 __pycache__/
 tags
+running/
+chrome_profile/
+log/
