@@ -49,8 +49,8 @@ ss-local --help
 ```
 ╰─ ps aux|head -1; ps aux|egrep -e 'test_ss[r]?.conf'|grep -v grep
 USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
-zioer    14131  0.0  0.0 110340  1220 pts/1    Sl   11:31   0:00 bin/ssr-client -c test_ssr.conf
-zioer    14205  0.0  0.0  19480  1572 pts/1    S    11:31   0:00 ss-local -c test_ss.conf
+tester    14131  0.0  0.0 110340  1220 pts/1    Sl   11:31   0:00 bin/ssr-client -c test_ssr.conf
+tester    14205  0.0  0.0  19480  1572 pts/1    S    11:31   0:00 ss-local -c test_ss.conf
 
 ```
 
@@ -58,8 +58,8 @@ zioer    14205  0.0  0.0  19480  1572 pts/1    S    11:31   0:00 ss-local -c tes
 ```
 ╰─ ps aux|head -1; ps aux|egrep -e 'test_ss[r]?.conf'|grep -v grep
 USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
-zioer    14131  0.0  0.0 110340  2824 pts/1    Sl   11:31   0:00 bin/ssr-client -c test_ssr.conf
-zioer    14205  0.0  0.0  19480  3284 pts/1    S    11:31   0:00 ss-local -c test_ss.conf
+tester    14131  0.0  0.0 110340  2824 pts/1    Sl   11:31   0:00 bin/ssr-client -c test_ssr.conf
+tester    14205  0.0  0.0  19480  3284 pts/1    S    11:31   0:00 ss-local -c test_ss.conf
 ```
 
 可以看到, `ssr-client`的内存占用比`ss-local`更少一些, 这比`python`版本的`ssr`客户端要更加节省资源.
