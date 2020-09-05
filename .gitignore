@@ -1,0 +1,4 @@
+*.log
+.ropeproject
+__pycache__/
+tags

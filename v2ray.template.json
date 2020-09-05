@@ -1,0 +1,40 @@
+{
+    "inbound": {
+        "listen": "0.0.0.0",
+        "port": 20100,
+        "protocol": "socks",
+        "settings": {
+            "auth": "noauth",
+            "clients": null,
+            "ip": "127.0.0.1"
+        },
+        "streamSettings": null
+    },
+    "outbound": {
+        "mux": {
+            "enabled": true
+        },
+        "protocol": "vmess",
+        "settings": {
+            "vnext": [
+                {
+                    "address": "www.kernels.bid",
+                    "port": 443,
+                    "users": [
+                        {
+                            "id": "52fcdfcf-4808-396d-57c3-58e2364214b7",
+                            "security": "auto"
+                        }
+                    ]
+                }
+            ]
+        },
+        "streamSettings": {
+            "network": "ws",
+            "security": "tls",
+            "wsSettings": {
+                "path": "/footers"
+            }
+        }
+    }
+}

@@ -1,0 +1,5 @@
+pyppeteer
+redis
+lxml
+requests
+PySocks
