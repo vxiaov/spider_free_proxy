@@ -99,54 +99,37 @@ def decode_ss_uri(ss_uri):
         return (s1[0], s3[0], s3[1], s2[1])
 
 
-def daemon_stop(pid_file):
-    import errno
-    try:
-        with open(pid_file) as f:
-            buf = f.read()
-            pid = buf
-            if not buf:
-                print('not running')
-    except IOError as e:
-        print(e)
-        if e.errno == errno.ENOENT:
-            # always exit 0 if we are sure daemon is not running
-            print('not running')
-            return
-        sys.exit(1)
-    pid = int(pid)
-    if pid > 0:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except OSError as e:
-            if e.errno == errno.ESRCH:
-                print('not running')
-                # always exit 0 if we are sure daemon is not running
-                return
-            print(e)
-            sys.exit(1)
-    else:
-        print('pid is not positive: %d', pid)
+def load_config(conf_file):
+    '''配置文件读取'''
+    config = configparser.ConfigParser()
+    ret = config.read(conf_file)
+    conf = {}
+    if len(ret) == 0:
+        print(f'config_file:{conf_file} read error!')
+        return None
+    conf['conf_dir'] = config['socks_client']['conf_dir']
+    conf['ss_cmd'] = config['socks_client']['ss_cmd']
+    conf['ssr_cmd'] = config['socks_client']['ssr_cmd']
+    conf['v2ray_cmd'] = config['socks_client']['v2ray_cmd']
+    conf['port_start'] = int(config['socks_client']['port_start'])
+    conf['port_num'] = int(config['socks_client']['port_num'])
 
-    # sleep for maximum 10s
-    for i in range(0, 200):
-        try:
-            # query for the pid
-            os.kill(pid, 0)
-        except OSError as e:
-            if e.errno == errno.ESRCH:
-                break
-        time.sleep(0.05)
-    else:
-        print('timed out when stopping pid %d', pid)
-        sys.exit(1)
-    print('stopped')
-    os.unlink(pid_file)
+    conf['v2ray_template'] = config['template']['v2ray_template']
+    conf['redis_uri'] = config['database']['redis_uri']
+
+    conf['use_proxy'] = config['proxy']['use_proxy'] or False
+    conf['use_proxy'] = True if conf['use_proxy'] == 'True' else False
+    conf['proxy'] = config['proxy']['proxy']
+    conf['check_url'] = config['proxy']['check_url']
+    conf['profile'] = config['proxy']['profile']
+
+    conf['log_conf'] = config['logging']['log_conf']
+    return conf
 
 
 class spider_proxy(object):
     '''
-    ssr spider: 爬取类型:  ssr_url信息/ssr参数信息
+    proxy spider: 爬取类型:  ss/ssr/v2ray/socks4/socks5/http
     '''
     def __init__(self, config=None):
         '''设置初始参数'''
@@ -335,26 +318,6 @@ class spider_proxy(object):
             pass
         return (host, False)
 
-    def check_socks5_old(self, socks):
-        '''
-        socks5代理有效性检测
-        return:
-            True: 有效
-            False: 无效
-        '''
-        proxies = {
-            'http': f'socks5://{socks}',
-            'https': f'socks5://{socks}'
-        }
-        url = self.check_url
-        try:
-            resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
-            if resp.status_code == 200:
-                return (socks, True)
-        except Exception as e:
-            pass
-        return (socks, False)
-
     def check_pool(self, check_func, param_list, maxn=10):
         '''
         检测代理有效性
@@ -373,36 +336,35 @@ class spider_proxy(object):
         pool.join()
         return results
 
-    def start_check_proxy(self, ptype='proxy', maxn=50):
+    def start_check_proxy(self, maxn=50):
         '''
-        检查socks5代理
+        检查远程客户端类型的http/socks5代理可用性
         params:
             ptype: proxy
             maxn : 代理服务最大并发数
         '''
-        while True:
-            redis = self.redis   # 有效代理{ local_port: server:server_port}
-            stable = self.stable[ptype]  # 所有代理信息hash表
-            rtable = self.rtable[ptype]  # 运行中的hash表
-            # 1.可用性检测-validition
-            host_list = [json.loads(_.decode()) for _ in redis.hgetall(stable).values()]
-            check_list = [{'host': _['server'] + ':' + _['server_port'], 'ptype': _['ptype']} for _ in host_list]
-            self.logger.info(f'开始 {ptype} 代理可用性检测: {stable} len={len(host_list)}')
-            check_results = self.check_pool(self.check_proxy, check_list, maxn=maxn)
-            # 检测结果: 删除失效端口
-            for _ in check_results:
-                socks, status = _
-                if not status:
-                    # 代理已失效, 替换端口进程
-                    sdel = redis.hdel(stable, socks)
-                    rdel = redis.srem(rtable, socks)
-                    log_str = f'{socks} invalid, {stable} del: {sdel} , {rtable} del: {rdel}.'
-                    self.logger.info(log_str)
-                    print(log_str)
-                else:
-                    if not redis.sismember(rtable, socks):
-                        redis.sadd(rtable, socks)
-            time.sleep(30)
+        ptype = 'proxy'
+        redis = self.redis   # 有效代理{ local_port: server:server_port}
+        stable = self.stable[ptype]  # 所有代理信息hash表
+        rtable = self.rtable[ptype]  # 运行中的hash表
+        # 1.可用性检测-validition
+        host_list = [json.loads(_.decode()) for _ in redis.hgetall(stable).values()]
+        check_list = [{'host': _['server'] + ':' + _['server_port'], 'ptype': _['ptype']} for _ in host_list]
+        self.logger.info(f'开始 {ptype} 代理可用性检测: {stable} len={len(host_list)}')
+        check_results = self.check_pool(self.check_proxy, check_list, maxn=maxn)
+        # 检测结果: 删除失效端口
+        for _ in check_results:
+            socks, status = _
+            if not status:
+                # 代理已失效, 替换端口进程
+                sdel = redis.hdel(stable, socks)
+                rdel = redis.srem(rtable, socks)
+                log_str = f'{socks} invalid, {stable} del: {sdel} , {rtable} del: {rdel}.'
+                self.logger.info(log_str)
+                print(log_str)
+            else:
+                if not redis.sismember(rtable, socks):
+                    redis.sadd(rtable, socks)
         return
 
     def start_check_socks5(self, ptype='ss', maxn=50):
@@ -412,109 +374,129 @@ class spider_proxy(object):
             ptype: ss/ssr
             maxn : 代理服务最大并发数
         '''
-        ptype_list = [ptype, ]
         ctx = mp.get_context('forkserver')
+        redis = self.redis   # 有效代理{ local_port: server:server_port}
+        port_num = self.port[ptype]
+        stable = self.stable[ptype]  # 所有代理信息hash表
+        rtable = self.rtable[ptype]  # 运行中的hash表
+        prog = self.prog[ptype]
+        # 1.可用性检测-validition
+        port_list = [_.decode() for _ in redis.hkeys(rtable)]
+        self.logger.info(f'开始 {ptype} 代理TCP握手检测: {rtable} len={len(port_list)}')
+        sock_list = ['127.0.0.1:'+str(_) for _ in port_list]
+        check_tcp_results = self.check_pool(self.check_tcp_connect, sock_list, maxn=maxn)
+        for _ in check_tcp_results:
+            orig_ip, ip, port, status = _
+            if not status:
+                # 服务不可访问
+                self.logger.debug(f' SERVICE_ERROR, 服务[{ip}:{port}]已经不可访问, 可能服务进程异常终止了.')
+                redis.hdel(rtable, port)
+        # 检查代理可用性
+        port_list = [_.decode() for _ in redis.hkeys(rtable)]
+        self.logger.info(f'开始 {ptype} 代理 socks 可用性检测: {rtable} len={len(port_list)}')
+        sock_list = [{'host': '127.0.0.1:'+str(_), 'ptype': 'socks5'} for _ in port_list]
+        check_socks_results = self.check_pool(self.check_proxy, sock_list, maxn=maxn)
+        # 检测结果: 删除失效端口
+        for _ in check_socks_results:
+            socks, status = _
+            local_port = socks.split(':')[1]
+            pidfile = self.conf_dir + local_port + '_' + ptype + '.pid'
+            # 已经启动了, 直接检测是否有效代理
+            if not status:
+                # 代理已失效, 替换端口进程
+                server = redis.hget(rtable, local_port)
+                server_info = redis.hget(stable, server)
+                # kill process
+                run_cmd = self.get_cmd(ptype, local_port)
+                kill_cmd = f'pkill -f "{run_cmd}"'
+                self.logger.debug(kill_cmd)
+                os.system(kill_cmd)
+                rdel = redis.hdel(rtable, local_port)
+                sdel = redis.hdel(stable, server)
+                log_str = f'local_port: {local_port} invalid, {stable} del: {sdel} , {rtable} del: {rdel} , server:{server.decode()} ] serverinfo: {server_info.decode()} ]'
+                self.logger.info(log_str)
+                print(log_str)
+            else:
+                if redis.hget(rtable, local_port) is None:
+                    '''非当前进程运行的服务,可能中途重启过'''
+                    redis.hset(rtable, local_port, 'valid_proxy')
+
+        # 2.可用代理启动-runing
+        socks_list = redis.hgetall(stable)
+        self.logger.info(f'开始 {ptype} 启动可用代理: {stable} len={len(socks_list)}')
+        for _ in list(socks_list):
+            socks = json.loads(socks_list[_].decode())
+            socks_id = _.decode()
+            proxies = [v.decode() for v in redis.hgetall(rtable).values()]
+            if socks_id in proxies:
+                self.logger.debug(f'{ptype} proxy : {socks_id} 已经运行中.')
+                continue
+            local_port = -1
+            for idx in range(port_num, port_num + maxn):
+                '''循环找到可用端口'''
+                if not redis.hget(rtable, idx):
+                    local_port = idx
+                    self.logger.debug(f'找到可用端口:{local_port} , 准备启动服务...')
+                    break
+            if local_port < 0:
+                self.logger.info(f'无可用端口: 当前服务数量: {len(proxies)}')
+                break
+            socks['local_port'] = local_port
+            cmd = self.gen_config(params=socks, ptype=ptype)
+            print(cmd)
+            self.logger.debug('运行命令: ' + cmd)
+
+            p = ctx.Process(name=_.decode(), target=os.system(cmd))
+            p.start()
+            if p:
+                time.sleep(0.5)  # 等待服务启动过程 #
+                socks = '127.0.0.1:' + str(local_port)
+                socks_proxy = {'host': socks, 'ptype': 'socks5'}
+                host, status = self.check_proxy(socks_proxy)
+                if not status:
+                    # kill process
+                    run_cmd = self.get_cmd(ptype, local_port)
+                    kill_cmd = f'pkill -f "{run_cmd}"'
+                    self.logger.debug(kill_cmd)
+                    os.system(kill_cmd)
+                    sdel = redis.hdel(stable, socks_id)
+                    rdel = redis.hdel(rtable, local_port)
+                    self.logger.info(f'新启动代理无效: 端口: {local_port} server: {socks_id}, {stable} delete {sdel} , {rtable} delete {rdel}.')
+                else:
+                    # 有效代理
+                    self.logger.info(f'SUCCESS: 端口: {local_port} 代理运行成功: {socks_id}')
+                    redis.hset(rtable, local_port, socks_id)
+            else:
+                self.logger.error("启动进程返回结果异常!")
+        return
+
+    def start_check(self, ptype='ss', maxn=50):
+        '''
+        检查所有代理可用性
+        params:
+            ptype: ss/ssr/v2ray/proxy
+            maxn : 代理服务最大并发数
+        '''
+        ctx = mp.get_context('fork')
+        ptype_list = [ptype, ]
         if ptype == 'all':
-            ptype_list = ['ssr', 'ss', 'v2ray']
+            ptype_list = ['ss', 'ssr', 'v2ray', 'proxy']
         while True:
+            p_list = []
             for ptype in ptype_list:
-                redis = self.redis   # 有效代理{ local_port: server:server_port}
-                port_num = self.port[ptype]
-                stable = self.stable[ptype]  # 所有代理信息hash表
-                rtable = self.rtable[ptype]  # 运行中的hash表
-                prog = self.prog[ptype]
-                # 1.可用性检测-validition
-                port_list = [_.decode() for _ in redis.hkeys(rtable)]
-                self.logger.info(f'开始 {ptype} 代理TCP握手检测: {rtable} len={len(port_list)}')
-                sock_list = ['127.0.0.1:'+str(_) for _ in port_list]
-                check_tcp_results = self.check_pool(self.check_tcp_connect, sock_list, maxn=10)
-                for _ in check_tcp_results:
-                    orig_ip, ip, port, status = _
-                    if not status:
-                        # 服务不可访问
-                        self.logger.debug(f' SERVICE_ERROR, 服务[{ip}:{port}]已经不可访问, 可能服务进程异常终止了.')
-                        redis.hdel(rtable, port)
-                # 检查代理可用性
-                port_list = [_.decode() for _ in redis.hkeys(rtable)]
-                self.logger.info(f'开始 {ptype} 代理 socks 可用性检测: {rtable} len={len(port_list)}')
-                sock_list = [{'host': '127.0.0.1:'+str(_), 'ptype': 'socks5'} for _ in port_list]
-                check_socks_results = self.check_pool(self.check_proxy, sock_list, maxn=10)
-                # 检测结果: 删除失效端口
-                for _ in check_socks_results:
-                    socks, status = _
-                    local_port = socks.split(':')[1]
-                    pidfile = self.conf_dir + local_port + '_' + ptype + '.pid'
-                    # 已经启动了, 直接检测是否有效代理
-                    if not status:
-                        # 代理已失效, 替换端口进程
-                        server = redis.hget(rtable, local_port)
-                        server_info = redis.hget(stable, server)
-                        # kill process
-                        run_cmd = self.get_cmd(ptype, local_port)
-                        kill_cmd = f'pkill -f "{run_cmd}"'
-                        self.logger.debug(kill_cmd)
-                        os.system(kill_cmd)
-                        rdel = redis.hdel(rtable, local_port)
-                        sdel = redis.hdel(stable, server)
-                        log_str = f'local_port: {local_port} invalid, {stable} del: {sdel} , {rtable} del: {rdel} , server:{server.decode()} ] serverinfo: {server_info.decode()} ]'
-                        self.logger.info(log_str)
-                        print(log_str)
-                    else:
-                        if redis.hget(rtable, local_port) is None:
-                            '''非当前进程运行的服务,可能中途重启过'''
-                            redis.hset(rtable, local_port, 'valid_proxy')
-
-                # 2.可用代理启动-runing
-                socks_list = redis.hgetall(stable)
-                self.logger.info(f'开始 {ptype} 启动可用代理: {stable} len={len(socks_list)}')
-                for _ in list(socks_list):
-                    socks = json.loads(socks_list[_].decode())
-                    socks_id = _.decode()
-                    proxies = [v.decode() for v in redis.hgetall(rtable).values()]
-                    if socks_id in proxies:
-                        self.logger.debug(f'{ptype} proxy : {socks_id} 已经运行中.')
-                        continue
-                    local_port = -1
-                    for idx in range(port_num, port_num + maxn):
-                        '''循环找到可用端口'''
-                        if not redis.hget(rtable, idx):
-                            local_port = idx
-                            self.logger.debug(f'找到可用端口:{local_port} , 准备启动服务...')
-                            break
-                    if local_port < 0:
-                        self.logger.info(f'无可用端口: 当前服务数量: {len(proxies)}')
-                        break
-                    socks['local_port'] = local_port
-                    cmd = self.gen_config(params=socks, ptype=ptype)
-                    print(cmd)
-                    self.logger.debug('运行命令: ' + cmd)
-
-                    p = ctx.Process(name=_.decode(), target=os.system(cmd))
-                    p.start()
-                    if p:
-                        time.sleep(0.5)  # 等待服务启动过程 #
-                        socks = '127.0.0.1:' + str(local_port)
-                        socks_proxy = {'host': socks, 'ptype': 'socks5'}
-                        host, status = self.check_proxy(socks_proxy)
-                        if not status:
-                            # kill process
-                            run_cmd = self.get_cmd(ptype, local_port)
-                            kill_cmd = f'pkill -f "{run_cmd}"'
-                            self.logger.debug(kill_cmd)
-                            os.system(kill_cmd)
-                            sdel = redis.hdel(stable, socks_id)
-                            rdel = redis.hdel(rtable, local_port)
-                            self.logger.info(f'新启动代理无效: 端口: {local_port} server: {socks_id}, {stable} delete {sdel} , {rtable} delete {rdel}.')
-                        else:
-                            # 有效代理
-                            self.logger.info(f'SUCCESS: 端口: {local_port} 代理运行成功: {socks_id}')
-                            redis.hset(rtable, local_port, socks_id)
-                    else:
-                        self.logger.error("启动进程返回结果异常!")
+                p = None
+                if ptype == 'proxy':
+                    p = ctx.Process(name=ptype, target=self.start_check_proxy, args=(maxn,))
+                else:
+                    p = ctx.Process(name=ptype, target=self.start_check_socks5, args=(ptype, maxn,))
+                p.start()
+                p_list.append(p)
+            for p in p_list:
+                p.join()
             time.sleep(30)
         return
 
-    def save_to_redis(self, data_list, ptype='ssr'):
+    def save_to_redis(self, data_list, ptype='ss'):
         '''
         代理信息存储:
         params:
@@ -653,7 +635,7 @@ class spider_proxy(object):
         # 存储代理信息
         self.save_to_redis(ssr_list, ptype='ssr')
 
-    async def start_get_proxy_async(self, ptype='all'):
+    async def get_proxy_async(self, ptype='all'):
         '''
         爬取代理任务
         参数信息:
@@ -956,7 +938,7 @@ class spider_proxy(object):
             print(e)
         return False
 
-    def start_get_proxy(self, ptype='all'):
+    def get_proxy(self, ptype='all'):
         '''
         爬取所有代理信息: 包括ss/ssr/v2ray
         '''
@@ -978,33 +960,15 @@ class spider_proxy(object):
             self.get_proxy_socks_proxynova()
         return
 
-
-def load_config(conf_file):
-    '''配置文件读取'''
-    config = configparser.ConfigParser()
-    ret = config.read(conf_file)
-    conf = {}
-    if len(ret) == 0:
-        print(f'config_file:{conf_file} read error!')
-        return None
-    conf['conf_dir'] = config['socks_client']['conf_dir']
-    conf['ss_cmd'] = config['socks_client']['ss_cmd']
-    conf['ssr_cmd'] = config['socks_client']['ssr_cmd']
-    conf['v2ray_cmd'] = config['socks_client']['v2ray_cmd']
-    conf['port_start'] = int(config['socks_client']['port_start'])
-    conf['port_num'] = int(config['socks_client']['port_num'])
-
-    conf['v2ray_template'] = config['template']['v2ray_template']
-    conf['redis_uri'] = config['database']['redis_uri']
-
-    conf['use_proxy'] = config['proxy']['use_proxy'] or False
-    conf['use_proxy'] = True if conf['use_proxy'] == 'True' else False
-    conf['proxy'] = config['proxy']['proxy']
-    conf['check_url'] = config['proxy']['check_url']
-    conf['profile'] = config['proxy']['profile']
-
-    conf['log_conf'] = config['logging']['log_conf']
-    return conf
+    async def start(self, ptype='all'):
+        '''
+        执行所有的爬取代理任务
+        参数信息:
+            ptype : ss/ssr/v2ray/all
+        '''
+        await self.get_proxy_async(ptype)
+        self.get_proxy(ptype)
+        return
 
 
 if __name__ == '__main__':
@@ -1030,16 +994,12 @@ if __name__ == '__main__':
 
     if check:
         print("start to check proxy:")
-        if check == 'proxy':
-            spider.start_check_proxy(ptype=check, maxn=200)
-        else:
-            spider.start_check_socks5(ptype=check)
+        spider.start_check(ptype=check, maxn=200)
 
     elif run:
         print("start to get_proxy:")
-        spider.start_get_proxy(run)
+        spider.get_proxy(run)
 
     elif proxy:
         print("start to get_proxy_async:", proxy)
-        asyncio.get_event_loop().run_until_complete(spider.start_get_proxy_async(proxy))
-# END
+        asyncio.get_event_loop().run_until_complete(spider.start(proxy))
