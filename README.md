@@ -9,10 +9,13 @@
 
 ### 1.`ss-local`命令安装
 
-- `Linux`系统命令安装: `apt install shadowsocks-libev`, 如果是`centos`系统`apt`命令换成`yum`即可.安装后系统中会增加`ss-local`命令.
-- `MacOS`系统安装:`brew install shadowsocks-libev`
-- `Windows`系统安装: `pip install shadowsocks`
-- `OpenWRT`系统安装: `opkg install shadowsocks-libev`
+
+`Linux`系统命令安装:
+- `Ubuntu`系统： `apt install shadowsocks-libev`
+- `CentOS`系统: `yum install shadowsocks-libev`
+- `openSUSE`系统: `zypper install shadowsocks-libev`
+
+安装后系统中会增加`ss-local`命令.
 
 
 验证需要的`ss-local`是否可用
