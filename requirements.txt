@@ -3,3 +3,5 @@ redis
 lxml
 requests
 PySocks
+apscheduler
+asyncio
