@@ -477,22 +477,15 @@ class spider_proxy(object):
             ptype: ss/ssr/v2ray/proxy
             maxn : 代理服务最大并发数
         '''
-        ctx = mp.get_context('fork')
         ptype_list = [ptype, ]
         if ptype == 'all':
             ptype_list = ['ss', 'ssr', 'v2ray', 'proxy']
         while True:
-            p_list = []
             for ptype in ptype_list:
-                p = None
                 if ptype == 'proxy':
-                    p = ctx.Process(name=ptype, target=self.start_check_proxy, args=(maxn,))
+                    self.start_check_proxy(maxn)
                 else:
-                    p = ctx.Process(name=ptype, target=self.start_check_socks5, args=(ptype, maxn,))
-                p.start()
-                p_list.append(p)
-            for p in p_list:
-                p.join()
+                    self.start_check_socks5(ptype, maxn)
             time.sleep(30)
         return
 
