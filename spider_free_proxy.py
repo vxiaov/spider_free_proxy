@@ -126,9 +126,9 @@ def decode_vmess_uri(vmess_uri):
         vmess['server'] = addr
         vmess['server_port'] = int(dec_info['port'])
         vmess['uid'] = dec_info['id']
-        vmess['network'] = dec_info['net']
-        vmess['path'] = dec_info['path']
-        vmess['tls'] = dec_info['tls']
+        vmess['network'] = dec_info.get('net', "")
+        vmess['path'] = dec_info.get('path', "")
+        vmess['tls'] = dec_info.get('tls', "")
         return vmess
 
 
@@ -190,7 +190,7 @@ class spider_proxy(object):
                 self.prog[ptype] = config['v2ray_cmd']
                 self.port[ptype] = self.port_start + self.max_num * 2
         self.check_url = config['check_url']
-        self.max_proc = config['max_proc']
+        self.max_proc = int(config['max_proc'])
         self.timeout = 12  # requests 请求超时时间
         self.headers = {
             'user-agent': 'Mozilla/5.0 (NT; Windows x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'
@@ -346,7 +346,7 @@ class spider_proxy(object):
         url = self.check_url
         try:
             resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=timeout)
-            self.logger.info(f'{resp.status_code}, {resp.url}')
+            # self.logger.info(f'{resp.status_code}, {resp.url}')
             if resp.status_code == 200:
                 return (host, True)
         except Exception as e:
@@ -950,6 +950,94 @@ class spider_proxy(object):
             self.logger.exception(str(e))
         return False
 
+    def get_proxy_from_url(self):
+        '''
+        Web页面爬取 ss/ssr/v2ray base64 url
+        提取类型:
+            ss/ssr/v2ray
+        '''
+        socks_server = self.socks_server.replace('socks5:', 'socks5h:')
+        proxies = {
+            'http': f'{socks_server}',
+            'https': f'{socks_server}'
+        }
+        try:
+            start_urls = [
+                'https://view.freev2ray.org',
+            ]
+            for url in start_urls:
+                resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
+                self.logger.info(f'{resp.status_code}, {resp.url}')
+                if resp.status_code == 200:
+                    data = resp.text
+                    ss_list = re.findall('(?<!vme)(ss://.*)\"', data)
+                    ssr_list = re.findall('(ssr://.*)\"', data)
+                    vmess_list = re.findall('(vmess://.*)\"', data)
+                    proxy_list = []
+                    for ss in ss_list:
+                        # method:password@server:server_port
+                        if ss == '':
+                            continue
+                        s = decode_ss_uri(ss)
+                        item = self.set_ss(server=s[2], server_port=int(s[3]), method=s[0], password=s[1])
+                        proxy_list.append(item)
+                    self.save_to_redis(proxy_list, ptype='ss')
+                    proxy_list = []
+                    for ssr in ssr_list:
+                        if ssr == '':
+                            continue
+                        item = decode_ssr_uri(ssr)
+                        proxy_list.append(item)
+                    self.save_to_redis(proxy_list, ptype='ssr')
+                    proxy_list = []
+                    for vmess in vmess_list:
+                        if vmess == '':
+                            continue
+                        item = decode_vmess_uri(vmess)
+                        proxy_list.append(item)
+                    self.save_to_redis(proxy_list, ptype='v2ray')
+            return True
+        except Exception as e:
+            self.logger.exception(str(e))
+        return False
+
+    def get_proxy_ss_ssbit(self):
+        '''
+        SS proxy spider SS_JSON: main_url = "https://trial.ssbit.win/"
+        '''
+        socks_server = self.socks_server
+        proxies = {
+            'http': f'{socks_server}',
+            'https': f'{socks_server}'
+        }
+        re_host = r'<span id="host.">(.*)?</span>'
+        re_port = r'<span id="port.">(.*)?</span>'
+        re_pass = r'id="pass.">(.*)?</span>'
+        re_method = r'<span id="encrypt.">(.*)?</span>'
+        try:
+            start_urls = [
+                "https://trial.ssbit.win/",
+            ]
+            for url in start_urls:
+                resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=30, verify=False)
+                self.logger.info(f'{resp.status_code}, {resp.url}')
+                if resp.status_code == 200:
+                    page_text = resp.text
+                    host_list = re.findall(re_host, page_text)
+                    port_list = re.findall(re_port, page_text)
+                    pass_list = re.findall(re_pass, page_text)
+                    method_list = re.findall(re_method, page_text)
+                    ss_list = []
+                    for i in range(0, len(host_list)):
+                        # server, server_port, method, password
+                        ss = self.set_ss(host_list[i], port_list[i], method_list[i], pass_list[i])
+                        ss_list.append(ss)
+                    # 存储代理信息
+                    self.save_to_redis(ss_list, ptype='ss')
+        except Exception as e:
+            self.logger.exception(str(e))
+        return True
+
     def get_proxy_socks_proxyscrape(self):
         '''
         免费代理提取: free proxy proxyscrape
@@ -1072,15 +1160,19 @@ class spider_proxy(object):
         爬取所有代理信息: 包括ss/ssr/v2ray
         '''
         if ptype in ['test']:
-            self.get_proxy_ssr_bitefu()
+            self.get_proxy_ss_ssbit()
+
+        if ptype in ['ss', 'all']:
+            self.get_proxy_ss_ssbit()
 
         if ptype in ['ssr', 'all']:
             self.get_proxy_ssr_bitefu()
-            self.get_proxy_from_rss_uri()
 
         if ptype in ['ss', 'ssr', 'v2ray', 'all']:
             self.get_proxy_freefq()
             self.get_proxy_youneedwin()
+            self.get_proxy_from_rss_uri()
+            self.get_proxy_from_url()
 
         if ptype in ['proxy', 'all']:
             self.get_proxy_socks_proxyscrape()
