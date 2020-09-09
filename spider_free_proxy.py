@@ -258,7 +258,6 @@ class spider_proxy(object):
         '''
         conf = {}
         conffile = self.conf_dir + str(params['local_port']) + '_' + ptype + '.conf'
-        pidfile = self.conf_dir + str(params['local_port']) + '_' + ptype + '.pid'
         if ptype == 'v2ray':
             conf = self.set_v2ray_conf(self.v2ray_template, params)
         else:
@@ -346,9 +345,10 @@ class spider_proxy(object):
         url = self.check_url
         try:
             resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=timeout)
-            # self.logger.info(f'{resp.status_code}, {resp.url}')
             if resp.status_code == 200:
                 return (host, True)
+        except requests.exceptions.ConnectionError:
+            self.logger.error(str(e))
         except Exception as e:
             self.logger.exception(str(e))
         return (host, False)
@@ -431,7 +431,6 @@ class spider_proxy(object):
         for _ in check_socks_results:
             socks, status = _
             local_port = socks.split(':')[1]
-            pidfile = self.conf_dir + local_port + '_' + ptype + '.pid'
             # 已经启动了, 直接检测是否有效代理
             if not status:
                 # 代理已失效, 替换端口进程
@@ -454,17 +453,18 @@ class spider_proxy(object):
         # 2.可用代理启动-runing
         socks_list = redis.hgetall(stable)
         self.logger.info(f'开始 {ptype} 启动可用代理: {stable} len={len(socks_list)}, port_start:{port_num}, port_num:{self.max_num}')
+        proxies = [v.decode() for v in redis.hgetall(rtable).values()]
+        using_ports = [v.decode() for v in redis.hgetall(rtable).keys()]
         for _ in list(socks_list):
             socks = json.loads(socks_list[_].decode())
             socks_id = _.decode()
-            proxies = [v.decode() for v in redis.hgetall(rtable).values()]
             if socks_id in proxies:
                 self.logger.debug(f'{ptype} proxy : {socks_id} 已经运行中.')
                 continue
             local_port = -1
             for idx in range(port_num, port_num + self.max_num):
                 '''循环找到可用端口'''
-                if not redis.hget(rtable, idx):
+                if str(idx) not in using_ports:
                     local_port = idx
                     self.logger.debug(f'找到可用端口:{local_port} , 准备启动服务...')
                     break
@@ -478,7 +478,7 @@ class spider_proxy(object):
             p = ctx.Process(name=_.decode(), target=os.system(cmd))
             p.start()
             if p:
-                time.sleep(0.5)  # 等待服务启动过程 #
+                time.sleep(0.4)  # 等待服务启动过程 #
                 socks = '127.0.0.1:' + str(local_port)
                 socks_proxy = {'host': socks, 'ptype': 'socks5'}
                 host, status = self.check_proxy(socks_proxy)
@@ -578,25 +578,6 @@ class spider_proxy(object):
         await page.evaluateOnNewDocument(js0)
         return page
 
-    async def get_proxy_ssr_weebly(self, page):
-        '''
-        SSR proxy spider SSR_URL: main_url = "https://gdmi.weebly.com/3118523398online.html"
-        '''
-        main_url = "https://gdmi.weebly.com/3118523398online.html"
-        await page.goto(main_url)
-        await page.waitForXPath(r'//div[@class="paragraph"]/a')
-        page_text = await page.content()
-        # 解析章节列表
-        tree = etree.HTML(page_text)
-        tr_list = tree.xpath(r'//div[@class="paragraph"]/a/@href')
-        ssr_list = []
-        for tr in tr_list:
-            ssr_info = decode_ssr_uri(tr)
-            ssr_list.append(ssr_info)
-        # 存储代理信息
-        self.save_to_redis(ssr_list, ptype='ssr')
-        return ssr_list
-
     async def get_proxy_ss_freess(self, page):
         '''
         SS proxy spider SS_JSON: main_url = "https://free-ss.site/"
@@ -623,7 +604,7 @@ class spider_proxy(object):
     async def get_proxy_ssrtool(self, page):
         '''ssrtool免费分享的SSR'''
         main_url = 'https://ssrtool.us/tool/free_ssr'
-        api_url = 'https://ssrtool.us/tool/api/free_ssr?page=1&limit=20'
+        api_url = 'https://ssrtool.us/tool/api/free_ssr?page=1&limit=100'
         await page.goto(main_url, timeout=60*1000)
         await page.waitForXPath(r'//table[@class="layui-table"]/tbody/tr', timeout=60*1000)
         await page.goto(api_url)
@@ -640,41 +621,20 @@ class spider_proxy(object):
         self.save_to_redis(ssr_list, ptype='ssr')
         return ssr_list
 
-    async def get_proxy_cloudfra_ssr(self, page):
-        '''免费分享的SSR: 无效'''
-        main_url = 'https://prom-php.herokuapp.com/cloudfra_ssr.txt'
-        await page.goto(main_url)
-        page_text = await page.evaluate('''() => {return document.querySelector("body").innerText; }''')
-        data_list = base64.b64decode(page_text).decode()
-        data_list = data_list.split('\r\n')
-        ssr_list = []
-        for tr in data_list:
-            try:
-                ssr_info = decode_ssr_uri(tr)
-            except Exception as e:
-                self.logger.exception(f'{str(e)}, ssr={tr}')
-                continue
-            ssr_list.append(ssr_info)
-        # 存储代理信息
-        self.save_to_redis(ssr_list, ptype='ssr')
-
     async def get_proxy_async(self, ptype='all'):
         '''
         爬取代理任务
         参数信息:
             ptype : ss/ssr/v2ray
         '''
-        headless = True
-        if ptype == 'test':
-            headless = False
-
+        headless = True if ptype != 'test' else False
         page = await self.get_browser(headless=headless)
+
         if ptype == 'test':
             print('单元测试')
             await self.get_proxy_ssrtool(page)
 
         elif ptype in ['ssr', 'all']:
-            await self.get_proxy_cloudfra_ssr(page)
             try:
                 await self.get_proxy_ssrtool(page)
             except Exception as e:
@@ -703,6 +663,7 @@ class spider_proxy(object):
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/online',
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/recent',
             'http://ss.pythonic.life/subscribe',
+            'https://prom-php.herokuapp.com/cloudfra_ssr.txt',
         ]
         ssr_list = []
         ss_list = []
@@ -964,38 +925,40 @@ class spider_proxy(object):
         try:
             start_urls = [
                 'https://view.freev2ray.org',
+                'http://tool.bitefu.net/ssr.html',
             ]
+            ss_list = []
+            ssr_list = []
+            v2ray_list = []
             for url in start_urls:
                 resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
                 self.logger.info(f'{resp.status_code}, {resp.url}')
                 if resp.status_code == 200:
                     data = resp.text
-                    ss_list = re.findall('(?<!vme)(ss://.*)\"', data)
-                    ssr_list = re.findall('(ssr://.*)\"', data)
-                    vmess_list = re.findall('(vmess://.*)\"', data)
-                    proxy_list = []
-                    for ss in ss_list:
-                        # method:password@server:server_port
+                    ss_urls = re.findall('(?<!vme)(ss://.*)\"', data)
+                    ssr_urls = re.findall('(ssr://.*)\"', data)
+                    vmess_urls = re.findall('(vmess://.*)\"', data)
+                    for ss in ss_urls:
                         if ss == '':
                             continue
+                        # method:password@server:server_port
                         s = decode_ss_uri(ss)
                         item = self.set_ss(server=s[2], server_port=int(s[3]), method=s[0], password=s[1])
-                        proxy_list.append(item)
-                    self.save_to_redis(proxy_list, ptype='ss')
-                    proxy_list = []
-                    for ssr in ssr_list:
+                        ss_list.append(item)
+                    for ssr in ssr_urls:
                         if ssr == '':
                             continue
                         item = decode_ssr_uri(ssr)
-                        proxy_list.append(item)
-                    self.save_to_redis(proxy_list, ptype='ssr')
-                    proxy_list = []
-                    for vmess in vmess_list:
+                        ssr_list.append(item)
+                    for vmess in vmess_urls:
                         if vmess == '':
                             continue
                         item = decode_vmess_uri(vmess)
-                        proxy_list.append(item)
-                    self.save_to_redis(proxy_list, ptype='v2ray')
+                        v2ray_list.append(item)
+                    self.logger.info(f'{resp.url}: ss:{len(ss_list)}, ssr:{len(ssr_list)}, v2ray:{len(v2ray_list)}')
+            self.save_to_redis(ss_list, ptype='ss')
+            self.save_to_redis(ssr_list, ptype='ssr')
+            self.save_to_redis(v2ray_list, ptype='v2ray')
             return True
         except Exception as e:
             self.logger.exception(str(e))
@@ -1160,7 +1123,7 @@ class spider_proxy(object):
         爬取所有代理信息: 包括ss/ssr/v2ray
         '''
         if ptype in ['test']:
-            self.get_proxy_ss_ssbit()
+            self.get_proxy_from_url()
 
         if ptype in ['ss', 'all']:
             self.get_proxy_ss_ssbit()
@@ -1174,7 +1137,7 @@ class spider_proxy(object):
             self.get_proxy_from_rss_uri()
             self.get_proxy_from_url()
 
-        if ptype in ['proxy', 'all']:
+        if ptype in ['proxy', ]:
             self.get_proxy_socks_proxyscrape()
             self.get_proxy_socks_freeproxyworld()
             self.get_proxy_socks_proxynova()

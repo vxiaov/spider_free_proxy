@@ -24,7 +24,7 @@ def exec_shell(fn_name):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('代理爬取调度器')
-    parser.add_argument('-p', '--proxy', default=10, choices=range(1, 30), help='代理提取器执行周期(单位:分钟)')
+    parser.add_argument('-p', '--proxy', default=6, choices=range(1, 30), help='代理提取器执行周期(单位:分钟)')
     parser.add_argument('-c', '--check', default=30, choices=range(1, 120), help='代理检测器执行周期(单位:分钟),常住内存模式,如果异常退出就启动一下')
     parser.add_argument('-f', '--conf', default='config.ini', help='代理配置文件')
     parse_result = parser.parse_args()
