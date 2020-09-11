@@ -13,7 +13,6 @@ import asyncio
 import logging
 import logging.config
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from spider_free_proxy import spider_proxy
 from spider_free_proxy import load_config
 
 
@@ -41,7 +40,7 @@ if __name__ == '__main__':
     scheduler = AsyncIOScheduler({
         'apscheduler.executors.default': {
             'class': 'apscheduler.executors.pool:ThreadPoolExecutor',
-            'max_workers': '20'
+            'max_workers': '10'
         },
         'apscheduler.executors.processpool': {
             'type': 'processpool',
@@ -53,10 +52,11 @@ if __name__ == '__main__':
     },
         logger=scheduler_log
     )
-    spider = spider_proxy(config=config)
+    exec_shell('sh ./start.sh -p all')
+    exec_shell('sh ./start.sh -c all')
     # trigger-触发器对象:  interval-间隔时间, date-按日期, cron-根据cron规则
-    scheduler.add_job(spider.start, trigger='interval', minutes=proxy,
-                      id='job_getter_001', args=['all', ])
+    scheduler.add_job(exec_shell, trigger='interval', minutes=proxy,
+                      id='job_getter_001', args=['sh ./start.sh -p all', ])
     scheduler.add_job(exec_shell, trigger='interval', seconds=check,
                       id='job_checker_001', args=['sh ./start.sh -c all', ])
 

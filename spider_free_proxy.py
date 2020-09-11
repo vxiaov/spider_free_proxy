@@ -201,7 +201,7 @@ def load_config(conf_file):
     return conf
 
 
-def get_resp(url, proxies=None, headers=None, timeout=10):
+def get_resp(url, proxies=None, headers=None, timeout=10, verify=True):
     '''
     发送requests请求模块，最多尝试3次
     '''
@@ -216,7 +216,7 @@ def get_resp(url, proxies=None, headers=None, timeout=10):
     resp = None
     for _ in range(3):
         try:
-            resp = requests.get(url, proxies=proxies, headers=headers, timeout=timeout)
+            resp = requests.get(url, proxies=proxies, headers=headers, timeout=timeout, verify=verify)
             return resp
         except:
             pass
@@ -683,7 +683,7 @@ class spider_proxy(object):
         for data in data_list:
             conf_json = {}
             for key in ssr_keys:
-                conf_json[key] = data[key]
+                conf_json[key] = data.get(key, "")
             ssr_list.append(conf_json)
         # 存储代理信息
         self.save_to_redis(ssr_list, ptype='ssr')
@@ -932,7 +932,7 @@ class spider_proxy(object):
                 "https://trial.ssbit.win/",
             ]
             for url in start_urls:
-                resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=30, verify=False)
+                resp = get_resp(url, proxies=proxies, headers=self.headers, timeout=30, verify=False)
                 self.logger.info(f'{resp.status_code}, {resp.url}')
                 if resp.status_code == 200:
                     page_text = resp.text
