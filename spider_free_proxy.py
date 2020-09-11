@@ -23,7 +23,7 @@ import asyncio
 import requests
 from pyppeteer import launch
 from lxml import etree
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 from multiprocessing.dummy import Pool as ThreadPool
 import multiprocessing as mp
 from redis import StrictRedis
@@ -96,13 +96,37 @@ def decode_ss_uri(ss_uri):
     解析ss_uri , 只返回元组信息,字段位置可能不固定
     params:
         ss_uri : 以 ss://开头的字符串
+        method:password@server:server_port
     '''
     if ss_uri.startswith('ss://'):
-        ss_info = base64.b64decode(b64pading(ss_uri[5:])).decode()
-        s1 = ss_info.split(':', maxsplit=1)
-        s2 = s1[1].rsplit(':', maxsplit=1)
-        s3 = s2[0].rsplit('@', maxsplit=1)  # 避免密码中含有特殊的@或:符号
-        return (s1[0], s3[0], s3[1], s2[1])
+        res = urlparse(unquote(ss_uri))
+        netloc = res.netloc.split('@')
+        plugin = parse_qs(res.query)
+        if len(netloc) > 1:
+            method, password = base64.b64decode(b64pading(netloc[0])).decode().split(':', maxsplit=1)
+            ip, port = netloc[1].split(':')
+            port = int(port)
+        else:
+            ss_uri = base64.b64decode(b64pading(netloc[0])).decode()
+            s1 = ss_uri.split(':', maxsplit=1)
+            s2 = s1[1].rsplit(':', maxsplit=1)
+            s3 = s2[0].rsplit('@', maxsplit=1)  # 避免密码中含有特殊的@或:符号
+            method = s1[0]
+            password = s3[0]
+            ip = s3[1]
+            port = int(s2[1])
+
+        conf = {}
+        conf['server'] = ip
+        conf['server_port'] = port
+        conf['method'] = method
+        conf['password'] = password
+        if len(plugin) > 0:
+            conf['plugin'] = plugin['plugin'][0]
+            conf['obfs'] = plugin['obfs'][0]
+            conf['obfs-host'] = plugin['obfs-host'][0]
+
+        return conf
 
 
 def decode_vmess_uri(vmess_uri):
@@ -132,6 +156,22 @@ def decode_vmess_uri(vmess_uri):
         return vmess
 
 
+def decode_uri(uri):
+    '''解析所有类型URI'''
+    ptype = ""
+    conf = {}
+    if uri.startswith('ss://'):
+        ptype = 'ss'
+        conf = decode_ss_uri(uri)
+    elif uri.startswith('ssr://'):
+        ptype = 'ssr'
+        conf = decode_ssr_uri(uri)
+    elif uri.startswith('vmess://'):
+        ptype = 'v2ray'
+        conf = decode_vmess_uri(uri)
+    return (ptype, conf)
+
+
 def load_config(conf_file):
     '''配置文件读取'''
     config = configparser.ConfigParser()
@@ -159,6 +199,28 @@ def load_config(conf_file):
 
     conf['log_conf'] = config['logging']['log_conf']
     return conf
+
+
+def get_resp(url, proxies=None, headers=None, timeout=10):
+    '''
+    发送requests请求模块，最多尝试3次
+    '''
+    headers = headers
+    if headers is None:
+        headers = {'user-agent': ua}
+    if isinstance(proxies, str):
+        proxies = {
+            'http': proxies,
+            'https': proxies,
+        }
+    resp = None
+    for _ in range(3):
+        try:
+            resp = requests.get(url, proxies=proxies, headers=headers, timeout=timeout)
+            return resp
+        except:
+            pass
+    return None
 
 
 class spider_proxy(object):
@@ -191,7 +253,7 @@ class spider_proxy(object):
                 self.port[ptype] = self.port_start + self.max_num * 2
         self.check_url = config['check_url']
         self.max_proc = int(config['max_proc'])
-        self.timeout = 12  # requests 请求超时时间
+        self.timeout = 10  # requests 请求超时时间
         self.headers = {
             'user-agent': 'Mozilla/5.0 (NT; Windows x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'
         }
@@ -227,7 +289,7 @@ class spider_proxy(object):
         v2ray['tls'] = tls
         return v2ray
 
-    def set_v2ray_conf(self, conf, v2ray_conf):
+    def set_conf_v2ray(self, conf, v2ray_conf):
         conf['inbound']['port'] = int(v2ray_conf['local_port'])
         conf['outbound']['settings']['vnext'][0]['address'] = v2ray_conf['server']
         conf['outbound']['settings']['vnext'][0]['port'] = v2ray_conf['server_port']
@@ -237,14 +299,17 @@ class spider_proxy(object):
         conf['outbound']['streamSettings']['security'] = v2ray_conf['tls'] if v2ray_conf['tls'] != "" else "none"
         return conf
 
-    def get_cmd(self, ptype, local_port):
+    def get_cmd(self, ptype, conf):
         '''获取程序启动命令'''
-        conffile = self.conf_dir + str(local_port) + '_' + ptype + '.conf'
+        conffile = self.conf_dir + str(conf['local_port']) + '_' + ptype + '.conf'
         prog = self.prog[ptype]
         if ptype in ['ssr']:
             res = f'{prog} -d -c {conffile}'
         elif ptype in ['ss']:
             res = f'{prog} -c {conffile}'
+            if conf.get('plugin', None):
+                # 插件模式运行
+                res += f' --plugin {conf["plugin"]} --plugin-opts \"obfs={conf["obfs"]};obfs-host={conf["obfs-host"]}\" '
         elif ptype == 'v2ray':
             res = f'{prog} -c {conffile}'
         return res
@@ -259,7 +324,7 @@ class spider_proxy(object):
         conf = {}
         conffile = self.conf_dir + str(params['local_port']) + '_' + ptype + '.conf'
         if ptype == 'v2ray':
-            conf = self.set_v2ray_conf(self.v2ray_template, params)
+            conf = self.set_conf_v2ray(self.v2ray_template, params)
         else:
             if ptype in ['ss', 'ssr']:
                 conf['server'] = params['server']
@@ -275,7 +340,7 @@ class spider_proxy(object):
         with open(conffile, 'w') as f:
             f.write(json.dumps(conf, sort_keys=True, indent=4))
 
-        res = self.get_cmd(ptype=ptype, local_port=params['local_port'])
+        res = self.get_cmd(ptype=ptype, conf=params)
         if ptype in ['ss', 'v2ray']:
             # v2ray 命令无守护模式
             res = f'nohup {res} >/dev/null 2>&1 &'
@@ -347,7 +412,7 @@ class spider_proxy(object):
             resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=timeout)
             if resp.status_code == 200:
                 return (host, True)
-        except requests.exceptions.ConnectionError:
+        except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
             self.logger.error(str(e))
         except Exception as e:
             self.logger.exception(str(e))
@@ -436,8 +501,10 @@ class spider_proxy(object):
                 # 代理已失效, 替换端口进程
                 server = redis.hget(rtable, local_port)
                 server_info = redis.hget(stable, server)
+                server_params = json.loads(server_info.decode())
+                server_params['local_port'] = int(local_port)
                 # kill process
-                run_cmd = self.get_cmd(ptype, local_port)
+                run_cmd = self.get_cmd(ptype, conf=server_params)
                 kill_cmd = f'pkill -f "{run_cmd}"'
                 self.logger.debug(kill_cmd)
                 os.system(kill_cmd)
@@ -454,7 +521,6 @@ class spider_proxy(object):
         socks_list = redis.hgetall(stable)
         self.logger.info(f'开始 {ptype} 启动可用代理: {stable} len={len(socks_list)}, port_start:{port_num}, port_num:{self.max_num}')
         proxies = [v.decode() for v in redis.hgetall(rtable).values()]
-        using_ports = [v.decode() for v in redis.hgetall(rtable).keys()]
         for _ in list(socks_list):
             socks = json.loads(socks_list[_].decode())
             socks_id = _.decode()
@@ -462,6 +528,7 @@ class spider_proxy(object):
                 self.logger.debug(f'{ptype} proxy : {socks_id} 已经运行中.')
                 continue
             local_port = -1
+            using_ports = [v.decode() for v in redis.hgetall(rtable).keys()]
             for idx in range(port_num, port_num + self.max_num):
                 '''循环找到可用端口'''
                 if str(idx) not in using_ports:
@@ -478,13 +545,14 @@ class spider_proxy(object):
             p = ctx.Process(name=_.decode(), target=os.system(cmd))
             p.start()
             if p:
-                time.sleep(0.4)  # 等待服务启动过程 #
-                socks = '127.0.0.1:' + str(local_port)
-                socks_proxy = {'host': socks, 'ptype': 'socks5'}
+                if ptype == 'v2ray':
+                    time.sleep(0.5)  # 等待服务启动过程 #
+                socks_addr = '127.0.0.1:' + str(local_port)
+                socks_proxy = {'host': socks_addr, 'ptype': 'socks5'}
                 host, status = self.check_proxy(socks_proxy)
                 if not status:
                     # kill process
-                    run_cmd = self.get_cmd(ptype, local_port)
+                    run_cmd = self.get_cmd(ptype, socks)
                     kill_cmd = f'pkill -f "{run_cmd}"'
                     self.logger.debug(kill_cmd)
                     os.system(kill_cmd)
@@ -507,7 +575,7 @@ class spider_proxy(object):
         '''
         ptype_list = [ptype, ]
         if ptype == 'all':
-            ptype_list = ['ss', 'ssr', 'v2ray', 'proxy']
+            ptype_list = ['ss', 'ssr', 'v2ray']
         while True:
             for ptype in ptype_list:
                 if ptype == 'proxy':
@@ -659,7 +727,9 @@ class spider_proxy(object):
             'https://qiaomenzhuanfx.netlify.app/',
             'https://muma16fx.netlify.app/',
             'https://youlianboshi.netlify.app/',
+            'https://raw.githubusercontent.com/ssrsub/ssr/master/ss-sub',
             'https://raw.githubusercontent.com/ssrsub/ssr/master/ssrsub',
+            'https://raw.githubusercontent.com/ssrsub/ssr/master/v2ray',
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/online',
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/recent',
             'http://ss.pythonic.life/subscribe',
@@ -669,7 +739,7 @@ class spider_proxy(object):
         ss_list = []
         vmess_list = []
         for main_url in order_ssr_list:
-            resp = requests.get(main_url, proxies=proxies, headers=self.headers)
+            resp = get_resp(main_url, proxies=proxies, headers=self.headers)
             print(resp.status_code, main_url)
             page_text = base64.b64decode(b64pading(resp.text)).decode()
             data_list = re.split(r'[\r]?\n', page_text)
@@ -682,8 +752,7 @@ class spider_proxy(object):
                         vmess_list.append(item)
                     elif data.startswith('ss://'):
                         # method:password@server:server_port
-                        s = decode_ss_uri(data)
-                        item = self.set_ss(server=s[2], server_port=int(s[3]), method=s[0], password=s[1])
+                        item = decode_ss_uri(data)
                         ss_list.append(item)
                     elif data.startswith('ssr://'):
                         item = decode_ssr_uri(data)
@@ -743,7 +812,7 @@ class spider_proxy(object):
                 'v2ray': '563',
             }
             # 第一次请求提取nonce信息
-            resp = requests.get(url, proxies=proxies, headers=self.headers)
+            resp = get_resp(url, proxies=proxies, headers=self.headers)
             nonce = re.findall(r'"nonce":"(.*?)","post_id', resp.text)
             self.logger.info(f'{resp.status_code}, {resp.url}')
             if len(nonce) == 0:
@@ -785,135 +854,15 @@ class spider_proxy(object):
                                 self.logger.exception(str(e))
                     self.save_to_redis(socks_list, ptype=ptype)
             return True
-        except Exception as e:
-            self.logger.exception(str(e))
-        return False
-
-    def get_proxy_ssr_bitefu(self):
-        '''
-        免费代理提取: http://tool.bitefu.net/ssr.html
-        提取类型:
-            ssr
-        '''
-        socks_server = self.socks_server.replace('socks5:', 'socks5h:')
-        proxies = {
-            'http': f'{socks_server}',
-            'https': f'{socks_server}'
-        }
-        url = 'http://tool.bitefu.net/ssr.html'
-        try:
-            resp = requests.get(url, proxies=proxies, headers=self.headers)
-            self.logger.info(f'{resp.status_code}, {resp.url}')
-            if resp.status_code == 200:
-                ss_data = resp.text
-                socks_list = []
-                re_str = r'href="(ssr://.*)?">'
-                ssr_info = re.findall(re_str, ss_data)
-                for ssr in ssr_info:
-                    try:
-                        item = decode_ssr_uri(ssr)
-                        socks_list.append(item)
-                    except Exception as e:
-                        self.logger.exception(str(e))
-                self.save_to_redis(socks_list, ptype='ssr')
-            return True
-        except Exception as e:
+        except requests.exceptions.ConnectionError as e:
             self.logger.error(str(e))
-        return False
-
-    def get_proxy_hugetiny(self):
-        '''
-        免费代理提取: free proxy https://raw.githubusercontent.com/hugetiny/awesome-vpn/master/READMECN.md
-        提取类型:
-            ss/ssr/v2ray
-        '''
-        socks_server = self.socks_server.replace('socks5:', 'socks5h:')
-        proxies = {
-            'http': f'{socks_server}',
-            'https': f'{socks_server}'
-        }
-        try:
-            url = 'https://raw.githubusercontent.com/hugetiny/awesome-vpn/master/READMECN.md'
-            resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
-            self.logger.info(f'{resp.status_code}, {resp.url}')
-            if resp.status_code == 200:
-                data = resp.text
-                ss_list = re.findall('(?<!vme)(ss://.*)\r?\n?', data)
-                ssr_list = re.findall('(ssr://.*)\r?\n?', data)
-                vmess_list = re.findall('(vmess://.*)\r?\n?', data)
-                proxy_list = []
-                for ss in ss_list:
-                    # method:password@server:server_port
-                    s = decode_ss_uri(ss)
-                    item = self.set_ss(server=s[2], server_port=int(s[3]), method=s[0], password=s[1])
-                    proxy_list.append(item)
-                self.save_to_redis(proxy_list, ptype='ss')
-                proxy_list = []
-                for ssr in ssr_list:
-                    item = decode_ssr_uri(ssr)
-                    proxy_list.append(item)
-                self.save_to_redis(proxy_list, ptype='ssr')
-                proxy_list = []
-                for vmess in vmess_list:
-                    item = decode_vmess_uri(vmess)
-                    proxy_list.append(item)
-                self.save_to_redis(proxy_list, ptype='v2ray')
-            return True
-        except Exception as e:
-            self.logger.exception(str(e))
-        return False
-
-    def get_proxy_freefq(self):
-        '''
-        免费代理提取: free proxy https://github.com/freefq/free
-        提取类型:
-            ss/ssr/v2ray
-        '''
-        socks_server = self.socks_server.replace('socks5:', 'socks5h:')
-        proxies = {
-            'http': f'{socks_server}',
-            'https': f'{socks_server}'
-        }
-        try:
-            url = 'https://raw.githubusercontent.com/freefq/free/master/README.md'
-            resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
-            self.logger.info(f'{resp.status_code}, {resp.url}')
-            if resp.status_code == 200:
-                data = resp.text
-                ss_list = re.findall('(?<!vme)(ss://.*)\r?\n', data)
-                ssr_list = re.findall('(ssr://.*)\r?\n', data)
-                vmess_list = re.findall('(vmess://.*)\r?\n', data)
-                proxy_list = []
-                for ss in ss_list:
-                    # method:password@server:server_port
-                    if ss == '':
-                        continue
-                    s = decode_ss_uri(ss)
-                    item = self.set_ss(server=s[2], server_port=int(s[3]), method=s[0], password=s[1])
-                    proxy_list.append(item)
-                self.save_to_redis(proxy_list, ptype='ss')
-                proxy_list = []
-                for ssr in ssr_list:
-                    if ssr == '':
-                        continue
-                    item = decode_ssr_uri(ssr)
-                    proxy_list.append(item)
-                self.save_to_redis(proxy_list, ptype='ssr')
-                proxy_list = []
-                for vmess in vmess_list:
-                    if vmess == '':
-                        continue
-                    item = decode_vmess_uri(vmess)
-                    proxy_list.append(item)
-                self.save_to_redis(proxy_list, ptype='v2ray')
-            return True
         except Exception as e:
             self.logger.exception(str(e))
         return False
 
     def get_proxy_from_url(self):
         '''
-        Web页面爬取 ss/ssr/v2ray base64 url
+        Web页面爬取 ss/ssr/v2ray base64 encoded url
         提取类型:
             ss/ssr/v2ray
         '''
@@ -926,12 +875,14 @@ class spider_proxy(object):
             start_urls = [
                 'https://view.freev2ray.org',
                 'http://tool.bitefu.net/ssr.html',
+                'https://raw.githubusercontent.com/hugetiny/awesome-vpn/master/READMECN.md',
+                'https://raw.githubusercontent.com/freefq/free/master/README.md',
             ]
             ss_list = []
             ssr_list = []
             v2ray_list = []
             for url in start_urls:
-                resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
+                resp = get_resp(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
                 self.logger.info(f'{resp.status_code}, {resp.url}')
                 if resp.status_code == 200:
                     data = resp.text
@@ -942,8 +893,7 @@ class spider_proxy(object):
                         if ss == '':
                             continue
                         # method:password@server:server_port
-                        s = decode_ss_uri(ss)
-                        item = self.set_ss(server=s[2], server_port=int(s[3]), method=s[0], password=s[1])
+                        item = decode_ss_uri(ss)
                         ss_list.append(item)
                     for ssr in ssr_urls:
                         if ssr == '':
@@ -997,6 +947,51 @@ class spider_proxy(object):
                         ss_list.append(ss)
                     # 存储代理信息
                     self.save_to_redis(ss_list, ptype='ss')
+        except Exception as e:
+            self.logger.exception(str(e))
+        return True
+
+    def get_proxy_ss_pythonic(self):
+        '''
+        SS proxy ss uri
+        '''
+        socks_server = self.socks_server
+        proxies = {
+            'http': f'{socks_server}',
+            'https': f'{socks_server}'
+        }
+        try:
+            start_urls = [
+                "http://ss.pythonic.life",
+            ]
+            for url in start_urls:
+                resp = get_resp(url, proxies=proxies, headers=self.headers, timeout=30)
+                self.logger.info(f'{resp.status_code}, {resp.url}')
+                if resp.status_code == 200:
+                    doc = etree.HTML(resp.text)
+                    res = doc.xpath(r'//ol/li/a/@href')
+                    ss_key = set()
+                    ssr_key = set()
+                    for i in res:
+                        surl = url + i
+                        resp = get_resp(surl)
+                        ss_urls = re.findall(r'(ss://.*)\#', resp.text)
+                        ssr_urls = re.findall(r'(ssr://.*)\#', resp.text)
+                        for _ in ss_urls:
+                            ss_key.add(_)
+                        for _ in ssr_urls:
+                            ssr_key.add(_)
+                    ss_list = []
+                    for ss in list(ss_key):
+                        item = decode_ss_uri(ss)
+                        ss_list.append(item)
+                    ssr_list = []
+                    for ssr in list(ssr_key):
+                        item = decode_ssr_uri(ssr)
+                        ssr_list.append(item)
+                    # 存储代理信息
+                    self.save_to_redis(ss_list, ptype='ss')
+                    self.save_to_redis(ssr_list, ptype='ssr')
         except Exception as e:
             self.logger.exception(str(e))
         return True
@@ -1123,16 +1118,13 @@ class spider_proxy(object):
         爬取所有代理信息: 包括ss/ssr/v2ray
         '''
         if ptype in ['test']:
-            self.get_proxy_from_url()
+            self.get_proxy_from_rss_uri()
 
         if ptype in ['ss', 'all']:
+            self.get_proxy_ss_pythonic()
             self.get_proxy_ss_ssbit()
 
-        if ptype in ['ssr', 'all']:
-            self.get_proxy_ssr_bitefu()
-
         if ptype in ['ss', 'ssr', 'v2ray', 'all']:
-            self.get_proxy_freefq()
             self.get_proxy_youneedwin()
             self.get_proxy_from_rss_uri()
             self.get_proxy_from_url()
