@@ -724,6 +724,7 @@ class spider_proxy(object):
             'https': f'{socks_server}'
         }
         order_ssr_list = [
+            'https://raw.githubusercontent.com/ntkernel/lantern/master/vmess_base64.txt',
             'https://qiaomenzhuanfx.netlify.app/',
             'https://muma16fx.netlify.app/',
             'https://youlianboshi.netlify.app/',
