@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env zsh
 #########################################################################
 # File Name: start.sh
 # Author: zioer
@@ -6,7 +6,7 @@
 # Created Time: 2020年08月26日 星期三 14时44分12秒
 #########################################################################
 
-. /apps/config/myprofile
+. ~/.zshrc
 
 usage(){
 cat <<END
@@ -53,8 +53,11 @@ run_cmd()
         nohup $cmd $params  >/dev/null 2>&1 &
     fi
 }
+
+
 {
 
+    # 初始化创建目录#
     for tmpdir in "running" "chrome_profile" "log"
     do
         if [ ! -r $tmpdir ] ; then
