@@ -35,9 +35,10 @@ if [ "$1" = ""  -o "$1" = "-h" ] ; then
 fi
 
 venv_name="spider"
-workdir=.
+workdir=/apps/code/github/my/spider_free_proxy
 cd $workdir
 
+conf_file="./conf/config.ini"
 
 
 run_cmd()
@@ -70,12 +71,12 @@ run_cmd()
     if [ "$1" = "cron" ] ; then
         # 执行调度任务
         shift 1
-        cmd="${workdir}/scheduler.py"
+        cmd="${workdir}/bin/scheduler.py -f ${conf_file}"
         params="$@"
         run_cmd "$cmd" "$params"
     else
         # 单任务执行
-        cmd="${workdir}/spider_free_proxy.py $@"
+        cmd="${workdir}/bin/spider_free_proxy.py --init ${conf_file} $@"
         run_cmd "$cmd"
     fi
 
