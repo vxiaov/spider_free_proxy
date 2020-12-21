@@ -9,13 +9,10 @@
 
 ### 1.`ss-local`命令安装
 
-
-`Linux`系统命令安装:
-- `Ubuntu`系统： `apt install shadowsocks-libev`
-- `CentOS`系统: `yum install shadowsocks-libev`
-- `openSUSE`系统: `zypper install shadowsocks-libev`
-
-安装后系统中会增加`ss-local`命令.
+- `Linux`系统命令安装: `apt install shadowsocks-libev`, 如果是`centos`系统`apt`命令换成`yum`即可.安装后系统中会增加`ss-local`命令.
+- `MacOS`系统安装:`brew install shadowsocks-libev`
+- `Windows`系统安装: `pip install shadowsocks`
+- `OpenWRT`系统安装: `opkg install shadowsocks-libev`
 
 
 验证需要的`ss-local`是否可用
@@ -278,10 +275,7 @@ OK
 
 ```sh
 ./spider_free_proxy.py -p 'all'  # 使用pyppetter方式使用无头浏览器爬虫
-./spider_free_proxy.py -r 'all'  # 使用`requests`方式爬虫
 ./spider_free_proxy.py -c 'all'  # ss/ssr/v2ray爬虫可用性服务检测与启动管理
-./spider_free_proxy.py -c 'proxy' # http/socks4/socks5 代理可用性检测(远程直接提供代理服务功能)
-
 ```
 
 ### 3.`cron`调度配置
@@ -294,4 +288,21 @@ OK
 之后保存退出即可.
 
 **需要说明的是** , `cron`调度执行的脚本`start.sh`一定要将环境变量文件加载进去(例如`source ~/.bashrc`),否则会因为环境问题而无法调度成功.
+
+## ss/ssr/v2ray URI 编码/解码工具
+> 个人封装的 代理URI编码/解码方法
+
+```sh
+$ ./proxy_uri_util.py -h
+
+usage: ss/ssr/v2ray代理URI编码、解码工具 [-h] [-e ENCODE ENCODE] [-d DECODE]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -e ENCODE ENCODE, --encode ENCODE ENCODE
+                        编码URI信息, 两个参数：代理URI类型 代理字符串, 代理URI类型:ss/ssr/vmess
+  -d DECODE, --decode DECODE
+                        解码URI信息
+
+```
 

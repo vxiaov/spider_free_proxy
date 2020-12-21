@@ -671,8 +671,10 @@ class spider_proxy(object):
 
     async def get_proxy_ssrtool(self, page):
         '''ssrtool免费分享的SSR'''
-        main_url = 'https://ssrtool.us/tool/free_ssr'
-        api_url = 'https://ssrtool.us/tool/api/free_ssr?page=1&limit=100'
+        base_url = 'https://usky.ml'
+        # base_url = 'https://ssrtool.us'
+        main_url = base_url + '/tool/free_ssr'
+        api_url = base_url + '/tool/api/free_ssr?page=1&limit=60'
         await page.goto(main_url, timeout=60*1000)
         await page.waitForXPath(r'//table[@class="layui-table"]/tbody/tr', timeout=60*1000)
         await page.goto(api_url)
@@ -734,16 +736,25 @@ class spider_proxy(object):
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/online',
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/recent',
             'http://ss.pythonic.life/subscribe',
-            'https://prom-php.herokuapp.com/cloudfra_ssr.txt',
+            # 'https://prom-php.herokuapp.com/cloudfra_ssr.txt',
         ]
         ssr_list = []
         ss_list = []
         vmess_list = []
         for main_url in order_ssr_list:
             resp = get_resp(main_url, proxies=proxies, headers=self.headers)
-            print(resp.status_code, main_url)
-            page_text = base64.b64decode(b64pading(resp.text)).decode()
-            data_list = re.split(r'[\r]?\n', page_text)
+            if resp is None:
+                self.logger.warning(f'get_resp url:{main_url} , resp is None!')
+                continue
+            self.logger.info(f'{resp.status_code}, {main_url}')
+            page_text = ""
+            data_list = []
+            try:
+                page_text = base64.b64decode(b64pading(resp.text)).decode()
+                data_list = re.split(r'[\r]?\n', page_text)
+            except Exception as e:
+                self.logger.exception(f'url:{main_url}, content:{resp.text}, exception: {str(e)}')
+                continue
             for data in data_list:
                 try:
                     if data == "":
@@ -934,6 +945,9 @@ class spider_proxy(object):
             ]
             for url in start_urls:
                 resp = get_resp(url, proxies=proxies, headers=self.headers, timeout=30, verify=False)
+                if resp is None:
+                    self.logger.warning(f'get_resp url:{url} , resp is None!')
+                    continue
                 self.logger.info(f'{resp.status_code}, {resp.url}')
                 if resp.status_code == 200:
                     page_text = resp.text
@@ -967,6 +981,9 @@ class spider_proxy(object):
             ]
             for url in start_urls:
                 resp = get_resp(url, proxies=proxies, headers=self.headers, timeout=30)
+                if resp is None:
+                    self.logger.warning(f'get_resp url:{url}, proxies:{socks_server} ,resp is None!')
+                    continue
                 self.logger.info(f'{resp.status_code}, {resp.url}')
                 if resp.status_code == 200:
                     doc = etree.HTML(resp.text)
