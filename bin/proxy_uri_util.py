@@ -9,6 +9,10 @@
 import json
 import base64
 from urllib.parse import urlparse, parse_qs, unquote
+import requests
+
+default_port = 1080  # 默认的本地端口
+default_url = 'https://raw.githubusercontent.com/learnhard-cn/free_proxy_ss/main/ssr/proxy.txt'
 
 
 def b64pading(enc):
@@ -20,6 +24,13 @@ def b64pading(enc):
 
 def b64encode(data):
     return base64.b64encode(data.encode()).decode()
+
+
+def get_socks(url=default_url):
+    '''提取URL中的代理并解析输出JSON格式'''
+    resp = requests.get(url)
+    socks_uri = base64.b64decode(resp.text)
+    return decode_uri(socks_uri.decode())
 
 
 def decode_ss_uri(ss_uri):
@@ -48,6 +59,7 @@ def decode_ss_uri(ss_uri):
             port = int(s2[1])
 
         conf = {}
+        conf['local_port'] = default_port
         conf['server'] = ip
         conf['server_port'] = port
         conf['method'] = method
@@ -106,6 +118,7 @@ def decode_ssr_uri(ssr_uri_string):
     conf_json['password'] = password
     conf_json['protocol'] = protocol
     conf_json['obfs'] = obfs
+    conf_json['local_port'] = default_port
     return conf_json
 
 
@@ -138,18 +151,19 @@ def decode_vmess_uri(vmess_uri):
 
 def decode_uri(uri):
     '''解析所有类型URI'''
-    ptype = ""
+    # ptype = ""
     conf = {}
     if uri.startswith('ss://'):
-        ptype = 'ss'
+        # ptype = 'ss'
         conf = decode_ss_uri(uri)
     elif uri.startswith('ssr://'):
-        ptype = 'ssr'
+        # ptype = 'ssr'
         conf = decode_ssr_uri(uri)
     elif uri.startswith('vmess://'):
-        ptype = 'v2ray'
+        # ptype = 'v2ray'
         conf = decode_vmess_uri(uri)
-    return (ptype, conf)
+    # print(ptype, conf)
+    return conf
 
 
 def encode_ss_uri(data):
@@ -234,16 +248,22 @@ if __name__ == '__main__':
     hints = '编码URI信息, 两个参数：代理URI类型 代理字符串, 代理URI类型:ss/ssr/vmess'
     parser.add_argument('-e', '--encode', nargs=2, help=hints)
     parser.add_argument('-d', '--decode', default=None, help='解码URI信息')
+    parser.add_argument('-g', '--get', default=default_url, help='获取免费订阅SS代理信息')
 
     parse_result = parser.parse_args()
     info_enc = parse_result.encode
     info_dec = parse_result.decode
+    info_get = parse_result.get
 
     if info_enc:
         res = encode_uri(*info_enc)
+        print(res)
     elif info_dec:
         res = decode_uri(info_dec)
+        print(json.dumps(res, indent=4))
+    elif info_get:
+        res = get_socks(info_get)
+        print(json.dumps(res, indent=4))
     else:
         print("无效输入")
         exit(0)
-    print(res)

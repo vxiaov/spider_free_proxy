@@ -7,30 +7,38 @@
 ########################################################################
 
 
-get_first_socks5()
+init_socks5()
 {
-	curl https://raw.githubusercontent.com/learnhard-cn/free_proxy_ss/main/ss/proxy.txt | base64 -d 
+    conf_file="./conf/default_ssr.conf"
+	python3 ./bin/proxy_uri_util.py  > ${conf_file}
+    ssr-client -d -c ${conf_file}
 }
 
 
 
 config_python_venv(){
 	venv_name="spider"
-	export PATH=/opt/anaconda3/bin:/opt/anaconda3/condabin:$PATH
-	# conda create -yn $venv_name python=3.8
-	conda init bash
+	install_path="/opt/anaconda3"
+
+	. ${install_path}/etc/profile.d/conda.sh
+	
+    conda env list| grep ${venv_name} >/dev/null
+    if [ "$?" = "0" ] ; then
+        echo "env [$venv_name] is already created!"
+    else
+	    conda create -yn $venv_name python=3.8
+	    conda init bash
+    fi
+
 	conda activate $venv_name
-	# git clone https://github.com/learnhard-cn/spider_free_proxy.git
-	# cd spider_free_proxy
 	pip install -r requirements.txt
-	echo "start to fetch socks5 proxy ... cmd :[python3 ./spider_free_proxy.py -p 'all']"
-	python3 ./bin/spider_free_proxy.py --init ./conf/config.ini -p 'all'   # 使用pyppetter方式使用无头浏览器爬虫,对于无桌面环境用户，第一次运行可能会出现浏览器无法启动情况，这是由于系统缺少浏览器运行的依赖库，可以手动执行浏览器命令看报错缺少的库信息，然后逐个安装上就可以解决。
-	echo "start to check valid socks5 proxy ... cmd :[python3 ./spider_free_proxy.py -c 'all']"
-	python3 ./bin/spider_free_proxy.py --init ./conf/config.ini -c 'all'   # checking ss/ssr/v2ray
 	
 	# 设置工作目录
-	sed -i "s/^workdir=.*/workdir=`pwd`/" start.sh
+    wkdir=`pwd`
+	sed -i "s/^workdir=.*/workdir=${wkdir}/" start.sh
 	sed -i "s/^venv_name=.*/venv_name=${venv_name}/" start.sh
+	sed -i "s/1084/1080/" ./conf/config.ini   # 修改默认代理为临时的1080端口代理
+
 	# 添加调度任务
 	echo "----------------------------------------------------------"
 	echo "You may need to add this job to crontab:"
@@ -49,4 +57,17 @@ do
 done
 
 config_python_venv
+
+init_socks5
+
+echo "1080端口代理可用性检测(可用时才可以正常运行爬虫爬取免费代理):"
+curl -x socks5://127.0.0.1:1080 https://httpbin.org/ip
+if [ "$?" = "0" ] ; then
+    ./start.sh -p all   # 第一次爬取代理
+    ./start.sh -c all   # 第一次验证有效并启动有效代理(有效代理启动后，就可以替换回1084端口了)
+	sed -i "s/1080/1084/" ./conf/config.ini   # 修改代理端口为haproxy代理端口
+else
+    echo "临时代理1080端口不可用，请更换一个可用代理再进行手工启动"
+fi
+
 

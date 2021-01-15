@@ -221,10 +221,12 @@ install_anaconda()
 	fi
 	# install anaconda python environment
 	ver="2020.11"
+	install_path="/opt/anaconda3"
 	echo "downloading Anaconda3... ver:[$ver], file size : 500MB+"
 	wget -c https://repo.anaconda.com/archive/Anaconda3-${ver}-Linux-x86_64.sh
-	echo "installing Anaconda3...(default to /opt/anaconda3)"
-	sh Anaconda3-${ver}-Linux-x86_64.sh -p /opt/anaconda3 -b
+	echo "installing Anaconda3...(default to ${install_path})"
+	sh Anaconda3-${ver}-Linux-x86_64.sh -p ${install_path} -b
+	source ${install_path}/etc/profile.d/conda.sh
 }
 
 
