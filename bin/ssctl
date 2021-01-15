@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+for item in "ss-local" "ssr-client" "v2ray"
+do
+    num=`pgrep $item|wc -l`
+    echo "$item : $num"
+done
