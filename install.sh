@@ -6,8 +6,11 @@
 # Created Time: 2021年01月15日 星期五 13时53分49秒
 ########################################################################
 
+. ~/.bashrc
+
 os_type=""  # Linux操作系统分支类型
 pac_cmd=""  # 包管理命令
+pac_cmd_ins=""  # 包管理命令
 cpu_arc=""  # CPU架构类型，仅支持x86_64
 
 check_sys() {
@@ -17,17 +20,17 @@ check_sys() {
 			centos)
 				os_type="$ID"
 				pac_cmd="yum"
-				pac_cmd_ins="$pac_cmd install "
+				pac_cmd_ins="$pac_cmd install -y"
 				;;
 			opensuse*)
 				os_type="$ID"
 				pac_cmd="zypper"
-				pac_cmd_ins="$pac_cmd install "
+				pac_cmd_ins="$pac_cmd install -y"
 				;;
 			ubuntu|debian)
 				os_type="$ID"
 				pac_cmd="apt-get"
-				pac_cmd_ins="$pac_cmd install "
+				pac_cmd_ins="$pac_cmd install -y"
 				;;
 			manjaro|arch*)
 				os_type="$ID"
@@ -53,41 +56,32 @@ check_sys() {
 }
 
 
-if [ "`id -u`" != "0" ] ; then
-	echo "root user needed!"
-	echo "you can add 'sudo ' command to the begining of the running command."
-	echo "or use root use to run it"
-	exit 0
-fi
-
-if [ `which unzip` != "0" ] ; then
-	${pac_cmd_ins} unzip
-fi
-
-if [ `which wget` != "0" ] ; then
-	${pac_cmd_ins} wget
-fi
-
-tmpdir="./bin"
+tmpdir="/tmp/proxy"
 
 ## 1. 安装客户端命令
 install_ss(){
-	${pac_cmd_ins} shadowsocks-libev 
+	${pac_cmd_ins} shadowsocks-libev  simple-obfs
 }
 
 
 install_ssr()
 {
-	ver="0.9.0"
-	wget -c https://github.com/ShadowsocksR-Live/shadowsocksr-native/releases/download/${ver}/ssr-native-linux-x64.zip
-	unzip -d ${tmpdir} ssr-native-linux-x64.zip
-	mv ./bin/ssr-client /usr/bin/
+	if [ ! -f ssr-native-linux-x64.zip ] ; then
+		ver="0.9.0"
+		wget -c https://github.com/ShadowsocksR-Live/shadowsocksr-native/releases/download/${ver}/ssr-native-linux-x64.zip
+	fi
+	unzip -o -d ${tmpdir} ssr-native-linux-x64.zip
+	cp -p ./bin/ssr-client /usr/bin/
 }
 
 install_v2ray()
 {
-	wget -c https://github.com/v2ray/dist/raw/master/v2ray-linux-64.zip
-	unzip -d ${tmpdir} v2ray-linux-64.zip
+	if [ ! -f v2ray-linux-64.zip ] ; then
+		wget -c https://github.com/v2ray/dist/raw/master/v2ray-linux-64.zip
+	fi
+	unzip -o -d ${tmpdir} v2ray-linux-64.zip
+	cp -p ${tmpdir}/v2* /usr/bin
+	cp -p ${tmpdir}/geo*.dat /usr/bin
 }
 
 install_haproxy(){
@@ -118,7 +112,7 @@ config_haproxy()
 	fi
 
 	# generate socks5 server list info
-	server_list_info=`awk 'BEGIN{for(i=0;i<=200;i++)printf("    server  socks5_%03d 127.0.0.1:%d check\n", i, 20000+i); }'`
+	server_list_info=`awk 'BEGIN{for(i=0;i<=200;i++)printf("\tserver  socks5_%03d 127.0.0.1:%d check\n", i, 20000+i); }'`
 
 	cat > /etc/haproxy/haproxy.cfg <<EOF
 global
@@ -171,7 +165,7 @@ backend socks5_backend
 	timeout connect 10s
 	# server  socks5_000 127.0.0.1:20000 check
 	# server  socks5_001 127.0.0.1:20001 check
-	${server_list_info}
+${server_list_info}
 
 # HAProxy web ui: http://localhost:19999/haproxy?stats
 listen stats
@@ -211,7 +205,7 @@ install_redis(){
 	${pac_cmd_ins} redis
 }
 
-start_haproxy()
+start_redis()
 {
 	echo "start redis..."
 	systemctl enable redis
@@ -224,16 +218,17 @@ install_anaconda()
 	echo "downloading Anaconda3... file size : 500MB+"
 	wget -c https://repo.anaconda.com/archive/Anaconda3-2020.11-Linux-x86_64.sh
 	echo "installing Anaconda3...(default to /opt/anaconda3)"
-	sh Anaconda3-2020.11-Linux-x86_64.sh -p PREFIX=/opt/anaconda3 -b
+	sh Anaconda3-2020.11-Linux-x86_64.sh -p /opt/anaconda3 -b
 }
 
 config_python_venv(){
 	venv_name="spider"
-	export PATH=/opt/anaconda3/bin:$PATH
-	conda create -n $venv_name python=3.8
+	export PATH=/opt/anaconda3/bin:/opt/anaconda3/condabin:$PATH
+	# conda create -yn $venv_name python=3.8
+	conda init bash
 	conda activate $venv_name
-	git clone https://github.com/learnhard-cn/spider_free_proxy.git
-	cd spider_free_proxy
+	# git clone https://github.com/learnhard-cn/spider_free_proxy.git
+	# cd spider_free_proxy
 	pip install -r requirements.txt
 	echo "start to fetch socks5 proxy ... cmd :[python3 ./spider_free_proxy.py -p 'all']"
 	python3 ./bin/spider_free_proxy.py --init ./conf/config.ini -p 'all'   # 使用pyppetter方式使用无头浏览器爬虫,对于无桌面环境用户，第一次运行可能会出现浏览器无法启动情况，这是由于系统缺少浏览器运行的依赖库，可以手动执行浏览器命令看报错缺少的库信息，然后逐个安装上就可以解决。
@@ -253,14 +248,44 @@ config_python_venv(){
 
 # main process
 
-install_ss
-install_ssr
-install_v2ray
 
-install_haproxy
-config_haproxy
-start_haproxy
+if [ "$?" != "0" ] ; then
+	echo "Unsupport system type"
+	exit 0
+fi
 
-install_redis
-start_redis
+if [ "`id -u`" != "0" ] ; then
+	echo "root user needed!"
+	echo "you can add 'sudo ' command to the begining of the running command."
+	echo "or use root use to run it"
+	exit 0
+fi
 
+if [ `which unzip` != "0" ] ; then
+	${pac_cmd_ins} unzip
+fi
+
+if [ `which wget` != "0" ] ; then
+	${pac_cmd_ins} wget
+fi
+
+check_sys
+
+main(){
+	install_ss
+	install_ssr
+	install_v2ray
+
+	install_haproxy
+	config_haproxy
+	start_haproxy
+
+	install_redis
+	start_redis
+	install_anaconda
+	config_python_venv
+}
+
+
+# main
+#
