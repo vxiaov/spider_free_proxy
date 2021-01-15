@@ -35,9 +35,10 @@ config_python_venv(){
 
     # 设置工作目录
     wkdir=`pwd`
-    sed -i "s/^workdir=.*/workdir=${wkdir}/g" start.sh
-    sed -i "s/^venv_name=.*/venv_name=${venv_name}/g" start.sh
-    sed -i "s/1084/1080/g" ./conf/config.ini   # 修改默认代理为临时的1080端口代理
+    sed -i "s#^workdir=.*#workdir=${wkdir}#g" start.sh
+    sed -i "s#^venv_name=.*#venv_name=${venv_name}#g" start.sh
+    sed -i "s#PYTHON_PATH#${install_path}#g" start.sh
+    sed -i "s#1084#1080#g" ./conf/config.ini   # 修改默认代理为临时的1080端口代理
 
     # 添加调度任务
     echo "----------------------------------------------------------"
