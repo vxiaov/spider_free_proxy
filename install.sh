@@ -66,35 +66,37 @@ install_ss(){
 
 install_ssr()
 {
+	which ssr-client >/dev/null
+	if [ "$?" = "0" ] ; then
+		echo "ssr-client is already installed !"
+		return 0
+	fi
 	if [ ! -f ssr-native-linux-x64.zip ] ; then
 		ver="0.9.0"
 		wget -c https://github.com/ShadowsocksR-Live/shadowsocksr-native/releases/download/${ver}/ssr-native-linux-x64.zip
+		unzip -o -d ${tmpdir} ssr-native-linux-x64.zip
 	fi
-	unzip -o -d ${tmpdir} ssr-native-linux-x64.zip
-	cp -p ./bin/ssr-client /usr/bin/
+	cp -p ${tmpdir}/ssr-client /usr/bin/
 }
 
 install_v2ray()
 {
+	which v2ray
+	if [ "$?" = "0" ] ; then
+		echo "v2ray is already installed !"
+		return 0
+	fi
 	if [ ! -f v2ray-linux-64.zip ] ; then
 		wget -c https://github.com/v2ray/dist/raw/master/v2ray-linux-64.zip
+		unzip -o -d ${tmpdir} v2ray-linux-64.zip
 	fi
-	unzip -o -d ${tmpdir} v2ray-linux-64.zip
-	cp -p ${tmpdir}/v2* /usr/bin
+	cp -p ${tmpdir}/v2ray /usr/bin
+	cp -p ${tmpdir}/v2ctl /usr/bin
 	cp -p ${tmpdir}/geo*.dat /usr/bin
 }
 
 install_haproxy(){
 	${pac_cmd_ins} haproxy
-}
-
-compile_haproxy(){
-	wget -c https://www.haproxy.org/download/2.2/src/haproxy-2.2.2.tar.gz
-	tar zxvf haproxy-2.2.2.tar.gz
-	cd haproxy-2.2.2
-	make clean
-	make -j $(nproc) TARGET=linux-glibc USE_OPENSSL=1 USE_ZLIB=1 USE_LUA=1 USE_PCRE=1 USE_SYSTEMD=1 PREFIX=/usr
-	sudo make install
 }
 
 
@@ -112,7 +114,7 @@ config_haproxy()
 	fi
 
 	# generate socks5 server list info
-	server_list_info=`awk 'BEGIN{for(i=0;i<=200;i++)printf("\tserver  socks5_%03d 127.0.0.1:%d check\n", i, 20000+i); }'`
+	server_list_info=`awk 'BEGIN{for(i=0;i<=150;i++)printf("\tserver  socks5_%03d 127.0.0.1:%d check\n", i, 20000+i); }'`
 
 	cat > /etc/haproxy/haproxy.cfg <<EOF
 global
@@ -163,8 +165,6 @@ backend socks5_backend
 	balance leastconn
 	timeout server  30s
 	timeout connect 10s
-	# server  socks5_000 127.0.0.1:20000 check
-	# server  socks5_001 127.0.0.1:20001 check
 ${server_list_info}
 
 # HAProxy web ui: http://localhost:19999/haproxy?stats
@@ -214,37 +214,19 @@ start_redis()
 
 install_anaconda()
 {
+	which anaconda >/dev/null
+	if [ "$?" = "0" ] ; then
+		echo "Anaconda3 is already installed!"
+		return 0
+	fi
 	# install anaconda python environment
-	echo "downloading Anaconda3... file size : 500MB+"
-	wget -c https://repo.anaconda.com/archive/Anaconda3-2020.11-Linux-x86_64.sh
+	ver="2020.11"
+	echo "downloading Anaconda3... ver:[$ver], file size : 500MB+"
+	wget -c https://repo.anaconda.com/archive/Anaconda3-${ver}-Linux-x86_64.sh
 	echo "installing Anaconda3...(default to /opt/anaconda3)"
-	sh Anaconda3-2020.11-Linux-x86_64.sh -p /opt/anaconda3 -b
+	sh Anaconda3-${ver}-Linux-x86_64.sh -p /opt/anaconda3 -b
 }
 
-config_python_venv(){
-	venv_name="spider"
-	export PATH=/opt/anaconda3/bin:/opt/anaconda3/condabin:$PATH
-	# conda create -yn $venv_name python=3.8
-	conda init bash
-	conda activate $venv_name
-	# git clone https://github.com/learnhard-cn/spider_free_proxy.git
-	# cd spider_free_proxy
-	pip install -r requirements.txt
-	echo "start to fetch socks5 proxy ... cmd :[python3 ./spider_free_proxy.py -p 'all']"
-	python3 ./bin/spider_free_proxy.py --init ./conf/config.ini -p 'all'   # 使用pyppetter方式使用无头浏览器爬虫,对于无桌面环境用户，第一次运行可能会出现浏览器无法启动情况，这是由于系统缺少浏览器运行的依赖库，可以手动执行浏览器命令看报错缺少的库信息，然后逐个安装上就可以解决。
-	echo "start to check valid socks5 proxy ... cmd :[python3 ./spider_free_proxy.py -c 'all']"
-	python3 ./bin/spider_free_proxy.py --init ./conf/config.ini -c 'all'   # checking ss/ssr/v2ray
-	
-	# 设置工作目录
-	sed -i "s/^workdir=.*/workdir=`pwd`/" start.sh
-	sed -i "s/^venv_name=.*/venv_name=${venv_name}/" start.sh
-	# 添加调度任务
-	echo "----------------------------------------------------------"
-	echo "You may need to add this job to crontab:"
-	echo "*/5 * * * * sh `pwd`/start.sh 'cron' >/dev/null 2>&1"
-	echo "----------------------------------------------------------"
-
-}
 
 # main process
 
@@ -261,11 +243,12 @@ if [ "`id -u`" != "0" ] ; then
 	exit 0
 fi
 
-if [ `which unzip` != "0" ] ; then
+which unzip >/dev/null
+if [ "$?" != "0" ] ; then
 	${pac_cmd_ins} unzip
 fi
-
-if [ `which wget` != "0" ] ; then
+which wget >/dev/null
+if [ "$?" != "0" ] ; then
 	${pac_cmd_ins} wget
 fi
 
@@ -283,9 +266,8 @@ main(){
 	install_redis
 	start_redis
 	install_anaconda
-	config_python_venv
 }
 
 
-# main
+main
 #
