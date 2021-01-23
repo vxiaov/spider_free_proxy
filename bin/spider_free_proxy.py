@@ -812,7 +812,7 @@ class spider_proxy(object):
         payload = {
             "action": "validate_input",
             "captcha": "success",
-            "nonce": "abb5df4f90",
+            "nonce": "127ccb95ba",
             "post_id": "33",
             "protection": "",
             "type": "captcha"
