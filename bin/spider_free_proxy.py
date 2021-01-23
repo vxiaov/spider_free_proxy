@@ -665,16 +665,18 @@ class spider_proxy(object):
             item = tr.xpath('./td/text()')
             ss = self.set_ss(item[1], item[2], item[3], item[4])
             ss_list.append(ss)
+        self.logger.info(f'url: {main_url}, {len(ss_list)}')
         # 存储代理信息
         self.save_to_redis(ss_list, ptype='ss')
         return ss_list
 
     async def get_proxy_ssrtool(self, page):
         '''ssrtool免费分享的SSR'''
-        base_url = 'https://usky.ml'
-        # base_url = 'https://ssrtool.us'
+        # base_url = 'https://www.ssrtool.com'
+        # base_url = 'https://usky.ml'
+        base_url = 'https://ssrtool.us'
         main_url = base_url + '/tool/free_ssr'
-        api_url = base_url + '/tool/api/free_ssr?page=1&limit=60'
+        api_url = base_url + '/tool/api/free_ssr?page=1&limit=30'
         await page.goto(main_url, timeout=60*1000)
         await page.waitForXPath(r'//table[@class="layui-table"]/tbody/tr', timeout=60*1000)
         await page.goto(api_url)
