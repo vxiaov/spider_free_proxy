@@ -12,13 +12,11 @@ import json
 import base64
 import os
 import re
-import sys
 import time
 import logging
 import logging.config
 import socket
 import argparse
-import signal
 import asyncio
 import requests
 from pyppeteer import launch
@@ -28,7 +26,6 @@ from multiprocessing.dummy import Pool as ThreadPool
 import multiprocessing as mp
 from redis import StrictRedis
 import configparser
-import traceback
 
 
 ua = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'
@@ -185,7 +182,7 @@ def load_config(conf_file):
     conf['ssr_cmd'] = config['socks_client']['ssr_cmd']
     conf['v2ray_cmd'] = config['socks_client']['v2ray_cmd']
     conf['port_start'] = int(config['socks_client']['port_start'])
-    conf['port_num'] = int(config['socks_client']['port_num'])
+    conf['port_num'] = config['socks_client']['port_num'].split(',')
 
     conf['v2ray_template'] = config['template']['v2ray_template']
     conf['redis_uri'] = config['database']['redis_uri']
@@ -235,7 +232,11 @@ class spider_proxy(object):
         self.port = {}
         redis_uri = config['redis_uri']
         self.redis = StrictRedis.from_url(redis_uri)
-        self.max_num = config['port_num']
+        self.max_num = {}
+        self.max_num['ss'] = int(config['port_num'][0])
+        self.max_num['ssr'] = int(config['port_num'][1])
+        self.max_num['v2ray'] = int(config['port_num'][2])
+        self.max_port = int(self.max_num['ss']) + int(self.max_num['ssr']) + int(self.max_num['v2ray'])   # 分配端口总数
         self.port_start = config['port_start']
 
         # ptype: 直接提供的服务: http/socks4/socks5
@@ -247,10 +248,10 @@ class spider_proxy(object):
                 self.port[ptype] = self.port_start
             elif ptype == 'ssr':
                 self.prog[ptype] = config['ssr_cmd']
-                self.port[ptype] = self.port_start + self.max_num
+                self.port[ptype] = self.port_start + int(self.max_num['ss'])
             elif ptype == 'v2ray':
                 self.prog[ptype] = config['v2ray_cmd']
-                self.port[ptype] = self.port_start + self.max_num * 2
+                self.port[ptype] = self.port_start + int(self.max_num['ss']) + int(self.max_num['ssr'])
         self.check_url = config['check_url']
         self.max_proc = int(config['max_proc'])
         self.timeout = 10  # requests 请求超时时间
@@ -473,24 +474,26 @@ class spider_proxy(object):
         '''
         ctx = mp.get_context('forkserver')
         redis = self.redis   # 有效代理{ local_port: server:server_port}
+        local_addr = '127.0.0.1'
         port_num = self.port[ptype]
         stable = self.stable[ptype]  # 所有代理信息hash表
         rtable = self.rtable[ptype]  # 运行中的hash表
-        prog = self.prog[ptype]
-        # 1.可用性检测-validition
+        # 1.可用性检测-
+        # 检测顺序： 1. 端口判断; 2. socks5服务有效性判断
+        # 1.1 验证已启动服务是否可用
         port_list = [_.decode() for _ in redis.hkeys(rtable)]
         self.logger.info(f'开始 {ptype} 代理TCP握手检测: {rtable} len={len(port_list)}')
-        sock_list = ['127.0.0.1:'+str(_) for _ in port_list]
+        sock_list = [local_addr + str(_) for _ in port_list]
         check_tcp_results = self.check_pool(self.check_tcp_connect, sock_list, maxn=self.max_proc)
         for _ in check_tcp_results:
             orig_ip, ip, port, status = _
             if not status:
                 self.logger.debug(f' SERVICE_ERROR, 服务[{ip}:{port}]已经不可访问, 可能服务进程异常终止了.')
                 redis.hdel(rtable, port)
-        # 检查代理可用性
+        # 1.2 检查SOCKS5代理可用性
         port_list = [_.decode() for _ in redis.hkeys(rtable)]
         self.logger.info(f'开始 {ptype} 代理 socks 可用性检测: {rtable} len={len(port_list)}')
-        sock_list = [{'host': '127.0.0.1:'+str(_), 'ptype': 'socks5'} for _ in port_list]
+        sock_list = [{'host': local_addr + str(_), 'ptype': 'socks5'} for _ in port_list]
         check_socks_results = self.check_pool(self.check_proxy, sock_list, maxn=self.max_proc)
         # 检测结果: 删除失效端口
         for _ in check_socks_results:
@@ -510,6 +513,7 @@ class spider_proxy(object):
                 os.system(kill_cmd)
                 rdel = redis.hdel(rtable, local_port)
                 sdel = redis.hdel(stable, server)
+                # 记录删除代理信息，可用于数据恢复(重要日志)
                 log_str = f'local_port: {local_port} invalid, {stable} del: {sdel} , {rtable} del: {rdel} , server:{server.decode()} ] serverinfo: {server_info.decode()} ]'
                 self.logger.info(log_str)
             else:
@@ -517,9 +521,10 @@ class spider_proxy(object):
                     '''非当前进程运行的服务,可能中途重启过'''
                     redis.hset(rtable, local_port, 'valid_proxy')
 
-        # 2.可用代理启动-runing
+        # 2.可用代理启动-从xxx_table中启动代理
+        # 执行过程： 1. 启动一个代理， 2. 判断此SOCKS5代理是否可用
         socks_list = redis.hgetall(stable)
-        self.logger.info(f'开始 {ptype} 启动可用代理: {stable} len={len(socks_list)}, port_start:{port_num}, port_num:{self.max_num}')
+        self.logger.info(f'开始 {ptype} 启动可用代理: {stable} len={len(socks_list)}, port_start:{port_num}')
         proxies = [v.decode() for v in redis.hgetall(rtable).values()]
         for _ in list(socks_list):
             socks = json.loads(socks_list[_].decode())
@@ -529,7 +534,7 @@ class spider_proxy(object):
                 continue
             local_port = -1
             using_ports = [v.decode() for v in redis.hgetall(rtable).keys()]
-            for idx in range(port_num, port_num + self.max_num):
+            for idx in range(port_num, port_num + self.max_num[ptype]):
                 '''循环找到可用端口'''
                 if str(idx) not in using_ports:
                     local_port = idx
@@ -547,7 +552,7 @@ class spider_proxy(object):
             if p:
                 if ptype == 'v2ray':
                     time.sleep(0.5)  # 等待服务启动过程 #
-                socks_addr = '127.0.0.1:' + str(local_port)
+                socks_addr = local_addr + str(local_port)
                 socks_proxy = {'host': socks_addr, 'ptype': 'socks5'}
                 host, status = self.check_proxy(socks_proxy)
                 if not status:
@@ -573,15 +578,26 @@ class spider_proxy(object):
         params:
             ptype: ss/ssr/v2ray/proxy
         '''
+        ctx = mp.get_context('fork')
         ptype_list = [ptype, ]
         if ptype == 'all':
             ptype_list = ['ss', 'ssr', 'v2ray']
         while True:
+            proc_list = []
             for ptype in ptype_list:
                 if ptype == 'proxy':
-                    self.start_check_proxy()
+                    # self.start_check_proxy()
+                    p = ctx.Process(target=self.start_check_proxy, args=())
                 else:
-                    self.start_check_socks5(ptype)
+                    # self.start_check_socks5(ptype)
+                    p = ctx.Process(target=self.start_check_socks5,
+                                    args=(ptype, ))
+                p.start()
+                proc_list.append(p)
+
+            # 等待并发启动服务执行结束
+            for p in proc_list:
+                p.join()
             time.sleep(30)
         return
 
@@ -604,7 +620,7 @@ class spider_proxy(object):
         pr_list = [ss['server'] + ':' + str(ss['server_port']) for ss in data_list if ss['server'].count(':') == 0]
         pr_dict = {ss['server'] + ':' + str(ss['server_port']): ss for ss in data_list if ss['server'].count(':') == 0}
 
-        results = self.check_pool(self.check_tcp_connect, pr_list, maxn=self.max_num)
+        results = self.check_pool(self.check_tcp_connect, pr_list, maxn=self.max_proc)
         for item in results:
             total += 1
             orig_ip, ip, port, status = item

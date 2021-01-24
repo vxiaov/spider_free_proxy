@@ -93,7 +93,7 @@ if __name__ == '__main__':
     # trigger-触发器对象:  interval-间隔时间, date-按日期, cron-根据cron规则
     scheduler.add_job(exec_shell, trigger='interval', minutes=proxy,
                       id='job_getter_001', args=['sh ./start.sh -p all', ])
-    scheduler.add_job(exec_shell, trigger='interval', seconds=check,
+    scheduler.add_job(exec_shell, trigger='interval', minutes=check,
                       id='job_checker_001', args=['sh ./start.sh -c all', ])
 
     scheduler.start()
