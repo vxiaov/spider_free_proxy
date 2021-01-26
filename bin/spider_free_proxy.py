@@ -474,7 +474,7 @@ class spider_proxy(object):
         '''
         ctx = mp.get_context('forkserver')
         redis = self.redis   # 有效代理{ local_port: server:server_port}
-        local_addr = '127.0.0.1'
+        local_addr = '127.0.0.1:'
         port_num = self.port[ptype]
         stable = self.stable[ptype]  # 所有代理信息hash表
         rtable = self.rtable[ptype]  # 运行中的hash表
