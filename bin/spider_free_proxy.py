@@ -13,13 +13,11 @@ import base64
 import os
 import re
 import time
-import logging
-import logging.config
 import socket
 import argparse
 import asyncio
 import requests
-from pyppeteer import launch
+from pyppeteer import DEBUG, launch
 from lxml import etree
 from urllib.parse import urlparse, parse_qs, unquote
 from multiprocessing.dummy import Pool as ThreadPool
@@ -27,6 +25,12 @@ import multiprocessing as mp
 from redis import StrictRedis
 import configparser
 
+
+if __name__ == '__main__':
+    import sys
+    sys.path.append('./')
+    print(sys.path)
+    from utils import *
 
 ua = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'
 js0 = '''() =>{Object.defineProperty(navigator, 'webdriver', {get: () => undefined });}'''
@@ -265,10 +269,8 @@ class spider_proxy(object):
         self.conf_dir = config['conf_dir']
         with open(config['v2ray_template'], 'r') as f:
             self.v2ray_template = json.loads(f.read())
-
-        # logging config
-        logging.config.fileConfig(config['log_conf'])
-        self.logger = logging.getLogger('proxy')
+        self.log_queue = mp.Queue()
+        self.log_conf = config['log_conf']
 
     def set_ss(self, server, server_port, method, password):
         '''设置ss参数信息'''
@@ -372,7 +374,7 @@ class spider_proxy(object):
             status = sock.connect_ex((ip, int(port)))
             sock.close()
         except Exception as e:
-            self.logger.warning(f'{host}, exception: {str(e)}')
+            self.log_queue.put(log_exc(WARNING, f'{host}, exception: {str(e)}'))
             if sock:
                 sock.close()
             return [addr[0], addr[0], port, False]
@@ -400,7 +402,7 @@ class spider_proxy(object):
         timeout = proxy.get('timeout', self.timeout)
 
         if not ptype or not host:
-            self.logger.debug(f'传入proxy参数key缺失: ptype={ptype}, host={host}')
+            self.log_queue.put(log_exc(DEBUG, f'传入proxy参数key缺失: ptype={ptype}, host={host}'))
             return (host, False)
         if ptype not in ['http', 'https', 'socks4', 'socks5', 'socks4h', 'socks5h']:
             return (host, False)
@@ -414,9 +416,9 @@ class spider_proxy(object):
             if resp.status_code == 200:
                 return (host, True)
         except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout) as e:
-            self.logger.error(str(e))
+            self.log_queue.put(log_exc(ERROR, str(e)))
         except Exception as e:
-            self.logger.exception(str(e))
+            self.log_queue.put(log_exc(EXECPTION, str(e)))
         return (host, False)
 
     def check_pool(self, check_func, param_list, maxn=10):
@@ -450,7 +452,7 @@ class spider_proxy(object):
         # 1.可用性检测-validition
         host_list = [json.loads(_.decode()) for _ in redis.hgetall(stable).values()]
         check_list = [{'host': _['server'] + ':' + _['server_port'], 'ptype': _['ptype']} for _ in host_list]
-        self.logger.info(f'开始 {ptype} 代理可用性检测: {stable} len={len(host_list)}')
+        self.log_queue.put(log_exc(INFO, f'开始 {ptype} 代理可用性检测: {stable} len={len(host_list)}'))
         check_results = self.check_pool(self.check_proxy, check_list, maxn=self.max_proc)
         # 检测结果: 删除失效端口
         for _ in check_results:
@@ -460,7 +462,7 @@ class spider_proxy(object):
                 sdel = redis.hdel(stable, socks)
                 rdel = redis.srem(rtable, socks)
                 log_str = f'{socks} invalid, {stable} del: {sdel} , {rtable} del: {rdel}.'
-                self.logger.info(log_str)
+                self.log_queue.put(log_exc(INFO, log_str))
             else:
                 if not redis.sismember(rtable, socks):
                     redis.sadd(rtable, socks)
@@ -482,17 +484,22 @@ class spider_proxy(object):
         # 检测顺序： 1. 端口判断; 2. socks5服务有效性判断
         # 1.1 验证已启动服务是否可用
         port_list = [_.decode() for _ in redis.hkeys(rtable)]
-        self.logger.info(f'开始 {ptype} 代理TCP握手检测: {rtable} len={len(port_list)}')
+        log_msg = log_exc(
+            INFO, f'开始 {ptype} 代理TCP握手检测: {rtable} len={len(port_list)}')
+        self.log_queue.put(log_msg)
         sock_list = [local_addr + str(_) for _ in port_list]
         check_tcp_results = self.check_pool(self.check_tcp_connect, sock_list, maxn=self.max_proc)
         for _ in check_tcp_results:
             orig_ip, ip, port, status = _
             if not status:
-                self.logger.debug(f' SERVICE_ERROR, 服务[{ip}:{port}]已经不可访问, 可能服务进程异常终止了.')
+                
+                self.log_queue.put(
+                    log_exc(
+                        DEBUG, f' SERVICE_ERROR, 服务[{ip}:{port}]已经不可访问, 可能服务进程异常终止了.'))
                 redis.hdel(rtable, port)
         # 1.2 检查SOCKS5代理可用性
         port_list = [_.decode() for _ in redis.hkeys(rtable)]
-        self.logger.info(f'开始 {ptype} 代理 socks 可用性检测: {rtable} len={len(port_list)}')
+        self.log_queue.put(log_exc(INFO, f'开始 {ptype} 代理 socks 可用性检测: {rtable} len={len(port_list)}'))
         sock_list = [{'host': local_addr + str(_), 'ptype': 'socks5'} for _ in port_list]
         check_socks_results = self.check_pool(self.check_proxy, sock_list, maxn=self.max_proc)
         # 检测结果: 删除失效端口
@@ -509,13 +516,13 @@ class spider_proxy(object):
                 # kill process
                 run_cmd = self.get_cmd(ptype, conf=server_params)
                 kill_cmd = f'pkill -f "{run_cmd}"'
-                self.logger.debug(kill_cmd)
+                self.log_queue.put(log_exc(DEBUG, f"执行停止进程命令: {kill_cmd}"))
                 os.system(kill_cmd)
                 rdel = redis.hdel(rtable, local_port)
                 sdel = redis.hdel(stable, server)
                 # 记录删除代理信息，可用于数据恢复(重要日志)
-                log_str = f'local_port: {local_port} invalid, {stable} del: {sdel} , {rtable} del: {rdel} , server:{server.decode()} ] serverinfo: {server_info.decode()} ]'
-                self.logger.info(log_str)
+                log_str = f'local_port: {local_port} invalid, {stable} del: {sdel} , {rtable} del: {rdel} , server:{server.decode()} [ serverinfo: {server_info.decode()} ]'
+                self.log_queue.put(log_exc(INFO, log_str))
             else:
                 if redis.hget(rtable, local_port) is None:
                     '''非当前进程运行的服务,可能中途重启过'''
@@ -524,13 +531,13 @@ class spider_proxy(object):
         # 2.可用代理启动-从xxx_table中启动代理
         # 执行过程： 1. 启动一个代理， 2. 判断此SOCKS5代理是否可用
         socks_list = redis.hgetall(stable)
-        self.logger.info(f'开始 {ptype} 启动可用代理: {stable} len={len(socks_list)}, port_start:{port_num}')
+        self.log_queue.put(log_exc(INFO, f'开始 {ptype} 启动可用代理: {stable} len={len(socks_list)}, port_start:{port_num}'))
         proxies = [v.decode() for v in redis.hgetall(rtable).values()]
         for _ in list(socks_list):
             socks = json.loads(socks_list[_].decode())
             socks_id = _.decode()
             if socks_id in proxies:
-                self.logger.debug(f'{ptype} proxy : {socks_id} 已经运行中.')
+                self.log_queue.put(log_exc(DEBUG, f'{ptype} proxy : {socks_id} 已经运行中.'))
                 continue
             local_port = -1
             using_ports = [v.decode() for v in redis.hgetall(rtable).keys()]
@@ -538,14 +545,14 @@ class spider_proxy(object):
                 '''循环找到可用端口'''
                 if str(idx) not in using_ports:
                     local_port = idx
-                    self.logger.debug(f'找到可用端口:{local_port} , 准备启动服务...')
+                    self.log_queue.put(log_exc(DEBUG, f'找到可用端口:{local_port} , 准备启动服务...'))
                     break
             if local_port < 0:
-                self.logger.info(f'无可用端口: 当前服务数量: {len(proxies)}')
+                self.log_queue.put(log_exc(INFO, f'无可用端口: 当前服务数量: {len(proxies)}'))
                 break
             socks['local_port'] = local_port
             cmd = self.gen_config(params=socks, ptype=ptype)
-            self.logger.debug('运行命令: ' + cmd)
+            self.log_queue.put(log_exc(DEBUG, '运行命令: ' + cmd))
 
             p = ctx.Process(name=_.decode(), target=os.system(cmd))
             p.start()
@@ -559,17 +566,20 @@ class spider_proxy(object):
                     # kill process
                     run_cmd = self.get_cmd(ptype, socks)
                     kill_cmd = f'pkill -f "{run_cmd}"'
-                    self.logger.debug(kill_cmd)
+                    self.log_queue.put(log_exc(DEBUG, kill_cmd))
                     os.system(kill_cmd)
                     sdel = redis.hdel(stable, socks_id)
                     rdel = redis.hdel(rtable, local_port)
-                    self.logger.debug(f'新启动代理无效: 端口: {local_port} server: {socks_id}, {stable} delete {sdel} , {rtable} delete {rdel}.')
+                    log_msg = f'新启动代理无效: 端口: {local_port} server: {socks_id}, {stable} delete {sdel} , {rtable} delete {rdel}.'
+                    self.log_queue.put(log_exc(DEBUG, log_msg))
+                    
                 else:
                     # 有效代理
-                    self.logger.info(f'SUCCESS: 端口: {local_port} 代理运行成功: {socks_id}')
+                    log_msg = f'SUCCESS: 端口: {local_port} 代理运行成功: {socks_id}'
+                    self.log_queue.put(log_exc(DEBUG, log_msg))
                     redis.hset(rtable, local_port, socks_id)
             else:
-                self.logger.error("启动进程返回结果异常!")
+                self.log_queue.put(log_exc(DEBUG, "启动进程返回结果异常!"))
         return
 
     def start_check(self, ptype='ss'):
@@ -579,6 +589,10 @@ class spider_proxy(object):
             ptype: ss/ssr/v2ray/proxy
         '''
         ctx = mp.get_context('fork')
+        # 启动日志处理进程
+        mp.Process(name='proxy_checker',
+                   target=log_process, args=(self.log_queue, self.log_conf, 'proxy_checker',)).start()
+
         ptype_list = [ptype, ]
         if ptype == 'all':
             ptype_list = ['ss', 'ssr', 'v2ray']
@@ -586,12 +600,9 @@ class spider_proxy(object):
             proc_list = []
             for ptype in ptype_list:
                 if ptype == 'proxy':
-                    # self.start_check_proxy()
-                    p = ctx.Process(target=self.start_check_proxy, args=())
+                    p = ctx.Process(name='proc-{}'.format(ptype), target=self.start_check_proxy, args=())
                 else:
-                    # self.start_check_socks5(ptype)
-                    p = ctx.Process(target=self.start_check_socks5,
-                                    args=(ptype, ))
+                    p = ctx.Process(name='proc-{}'.format(ptype), target=self.start_check_socks5, args=(ptype, ))
                 p.start()
                 proc_list.append(p)
 
@@ -612,7 +623,7 @@ class spider_proxy(object):
         if ptype in ['ssr', 'ss', 'v2ray', 'proxy']:
             htable = self.stable[ptype]
         else:
-            self.logger.debug(f'invalid ptype:{ptype}')
+            self.log_queue.put(log_exc(DEBUG, f'invalid ptype:{ptype}'))
             return
 
         total, doer, count, invalid = 0, 0, 0, 0
@@ -639,7 +650,7 @@ class spider_proxy(object):
             count += 1
 
         # 入库日志
-        self.logger.info(f"redis ptype: {ptype}: total: {total} :loaded: {count} :doer {doer} :invalid {invalid}")
+        self.log_queue.put(log_exc(INFO, f"redis ptype: {ptype}: total: {total} :loaded: {count} :doer {doer} :invalid {invalid}"))
         return True
 
     async def get_browser(self, headless=True, use_proxy=False, autoClose=True):
@@ -649,11 +660,11 @@ class spider_proxy(object):
         if self.use_proxy:
             proxy_server = "--proxy-server=" + config['proxy']
             browser_args.append(proxy_server)
-        self.logger.debug(browser_args)
+        self.log_queue.put(log_exc(DEBUG, browser_args))
         # headless参数设为False，则变成有头模式
         user_dir = self.profile
         browser = await launch(headless=headless, args=browser_args, logLevel='DEBUG', userDataDir=user_dir, autoClose=autoClose)
-        self.logger.debug(browser)
+        self.log_queue.put(log_exc(DEBUG, browser))
         pages = await browser.pages()
         page = pages[0]
         # 设置页面视图大小
@@ -681,7 +692,7 @@ class spider_proxy(object):
             item = tr.xpath('./td/text()')
             ss = self.set_ss(item[1], item[2], item[3], item[4])
             ss_list.append(ss)
-        self.logger.info(f'url: {main_url}, {len(ss_list)}')
+        self.log_queue.put(log_exc(INFO, f'url: {main_url}, {len(ss_list)}'))
         # 存储代理信息
         self.save_to_redis(ss_list, ptype='ss')
         return ss_list
@@ -726,7 +737,7 @@ class spider_proxy(object):
             try:
                 await self.get_proxy_ssrtool(page)
             except Exception as e:
-                self.logger.exception(str(e))
+                self.log_queue.put(log_exc(EXECPTION, str(e)))
 
         elif ptype in ['ss', 'all']:
             await self.get_proxy_ss_freess(page)
@@ -762,16 +773,16 @@ class spider_proxy(object):
         for main_url in order_ssr_list:
             resp = get_resp(main_url, proxies=proxies, headers=self.headers)
             if resp is None:
-                self.logger.warning(f'get_resp url:{main_url} , resp is None!')
+                self.log_queue.put(log_exc(WARNING, f'get_resp url:{main_url} , resp is None!'))
                 continue
-            self.logger.info(f'{resp.status_code}, {main_url}')
+            self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {main_url}'))
             page_text = ""
             data_list = []
             try:
                 page_text = base64.b64decode(b64pading(resp.text)).decode()
                 data_list = re.split(r'[\r]?\n', page_text)
             except Exception as e:
-                self.logger.exception(f'url:{main_url}, content:{resp.text}, exception: {str(e)}')
+                self.log_queue.put(log_exc(EXECPTION, f'url:{main_url}, content:{resp.text}, exception: {str(e)}'))
                 continue
             for data in data_list:
                 try:
@@ -788,7 +799,7 @@ class spider_proxy(object):
                         item = decode_ssr_uri(data)
                         ssr_list.append(item)
                 except Exception as e:
-                    self.logger.exception(str(e))
+                    self.log_queue.put(log_exc(EXECPTION, str(e)))
                     continue
         # 存储代理信息
         self.save_to_redis(ss_list, ptype='ss')
@@ -844,7 +855,7 @@ class spider_proxy(object):
             # 第一次请求提取nonce信息
             resp = get_resp(url, proxies=proxies, headers=self.headers)
             nonce = re.findall(r'"nonce":"(.*?)","post_id', resp.text)
-            self.logger.info(f'{resp.status_code}, {resp.url}')
+            self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {resp.url}'))
             if len(nonce) == 0:
                 return False
             nonce = nonce[0]
@@ -852,7 +863,7 @@ class spider_proxy(object):
             for ptype in ['ss', 'ssr', 'v2ray']:
                 payload['post_id'] = post_id[ptype]
                 resp = requests.post(url_api, proxies=proxies, headers=headers, data=payload)
-                self.logger.info(f'{resp.status_code}, {resp.url}')
+                self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {resp.url}'))
                 if resp.status_code == 200:
                     ss_data = resp.json().get('content')
                     socks_list = []
@@ -870,7 +881,7 @@ class spider_proxy(object):
                                 item = decode_ssr_uri(ssr)
                                 socks_list.append(item)
                             except Exception as e:
-                                self.logger.exception(str(e))
+                                self.log_queue.put(log_exc(EXECPTION, str(e)))
                     elif ptype == 'v2ray':
                         re_str = r'<td align="center">(.*)?</td>\n<td align="center">(.*)?</td>\n<td align="center">(.*)?</td>\n'\
                             '<td align="center">(.*)?</td>\n<td align="center">(.*)?</td>\n<td align="center">(.*)?</td>'
@@ -881,13 +892,13 @@ class spider_proxy(object):
                                 item = self.set_v2ray(*v2ray)
                                 socks_list.append(item)
                             except Exception as e:
-                                self.logger.exception(str(e))
+                                self.log_queue.put(log_exc(EXECPTION, str(e)))
                     self.save_to_redis(socks_list, ptype=ptype)
             return True
         except requests.exceptions.ConnectionError as e:
-            self.logger.error(str(e))
+            self.log_queue.put(log_exc(ERROR, str(e)))
         except Exception as e:
-            self.logger.exception(str(e))
+            self.log_queue.put(log_exc(EXECPTION, str(e)))
         return False
 
     def get_proxy_from_url(self):
@@ -913,7 +924,7 @@ class spider_proxy(object):
             v2ray_list = []
             for url in start_urls:
                 resp = get_resp(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
-                self.logger.info(f'{resp.status_code}, {resp.url}')
+                self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {resp.url}'))
                 if resp.status_code == 200:
                     data = resp.text
                     ss_urls = re.findall('(?<!vme)(ss://.*)\"', data)
@@ -935,13 +946,13 @@ class spider_proxy(object):
                             continue
                         item = decode_vmess_uri(vmess)
                         v2ray_list.append(item)
-                    self.logger.info(f'{resp.url}: ss:{len(ss_list)}, ssr:{len(ssr_list)}, v2ray:{len(v2ray_list)}')
+                    self.log_queue.put(log_exc(INFO, f'{resp.url}: ss:{len(ss_list)}, ssr:{len(ssr_list)}, v2ray:{len(v2ray_list)}'))
             self.save_to_redis(ss_list, ptype='ss')
             self.save_to_redis(ssr_list, ptype='ssr')
             self.save_to_redis(v2ray_list, ptype='v2ray')
             return True
         except Exception as e:
-            self.logger.exception(str(e))
+            self.log_queue.put(log_exc(EXECPTION, str(e)))
         return False
 
     def get_proxy_ss_ssbit(self):
@@ -964,9 +975,9 @@ class spider_proxy(object):
             for url in start_urls:
                 resp = get_resp(url, proxies=proxies, headers=self.headers, timeout=30, verify=False)
                 if resp is None:
-                    self.logger.warning(f'get_resp url:{url} , resp is None!')
+                    self.log_queue.put(log_exc(WARNING, f'get_resp url:{url} , resp is None!'))
                     continue
-                self.logger.info(f'{resp.status_code}, {resp.url}')
+                self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {resp.url}'))
                 if resp.status_code == 200:
                     page_text = resp.text
                     host_list = re.findall(re_host, page_text)
@@ -981,7 +992,7 @@ class spider_proxy(object):
                     # 存储代理信息
                     self.save_to_redis(ss_list, ptype='ss')
         except Exception as e:
-            self.logger.exception(str(e))
+            self.log_queue.put(log_exc(EXECPTION, str(e)))
         return True
 
     def get_proxy_ss_pythonic(self):
@@ -1000,9 +1011,9 @@ class spider_proxy(object):
             for url in start_urls:
                 resp = get_resp(url, proxies=proxies, headers=self.headers, timeout=30)
                 if resp is None:
-                    self.logger.warning(f'get_resp url:{url}, proxies:{socks_server} ,resp is None!')
+                    self.log_queue.put(log_exc(WARNING, f'get_resp url:{url}, proxies:{socks_server} ,resp is None!'))
                     continue
-                self.logger.info(f'{resp.status_code}, {resp.url}')
+                self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {resp.url}'))
                 if resp.status_code == 200:
                     doc = etree.HTML(resp.text)
                     res = doc.xpath(r'//ol/li/a/@href')
@@ -1029,7 +1040,7 @@ class spider_proxy(object):
                     self.save_to_redis(ss_list, ptype='ss')
                     self.save_to_redis(ssr_list, ptype='ssr')
         except Exception as e:
-            self.logger.exception(str(e))
+            self.log_queue.put(log_exc(EXECPTION, str(e)))
         return True
 
     def get_proxy_socks_proxyscrape(self):
@@ -1047,7 +1058,7 @@ class spider_proxy(object):
             for ptype in ['http', 'socks4', 'socks5']:
                 url = f'https://api.proxyscrape.com/?request=getproxies&proxytype={ptype}&timeout=10000&country=all'
                 resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
-                self.logger.info(f'{resp.status_code}, {resp.url}')
+                self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {resp.url}'))
                 if resp.status_code == 200:
                     ss_data = resp.text
                     socks_list = []
@@ -1063,7 +1074,7 @@ class spider_proxy(object):
                     self.save_to_redis(proxy_list, ptype='proxy')
             return True
         except Exception as e:
-            self.logger.exception(str(e))
+            self.log_queue.put(log_exc(EXECPTION, str(e)))
         return False
 
     def get_proxy_socks_freeproxyworld(self):
@@ -1082,7 +1093,7 @@ class spider_proxy(object):
                 for page in range(1, 3):
                     url = f'https://www.freeproxy.world/?type={ptype}&anonymity=&country=&speed=&port=&page={page}'
                     resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
-                    self.logger.info(f'{resp.status_code}, {resp.url}')
+                    self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {resp.url}'))
                     if resp.status_code == 200:
                         doc = etree.HTML(resp.text)
                         tr_list = doc.xpath(r'//div[@class="proxy-table"]/table/tbody/tr')
@@ -1105,7 +1116,7 @@ class spider_proxy(object):
                         self.save_to_redis(proxy_list, ptype='proxy')
             return True
         except Exception as e:
-            self.logger.exception(str(e))
+            self.log_queue.put(log_exc(EXECPTION, str(e)))
         return False
 
     def get_proxy_socks_proxynova(self):
@@ -1123,7 +1134,7 @@ class spider_proxy(object):
             for ptype in ['http']:
                 url = f'https://www.proxynova.com/proxy-server-list/elite-proxies/'
                 resp = requests.get(url, proxies=proxies, headers=self.headers, timeout=self.timeout)
-                self.logger.info(f'{resp.status_code}, {resp.url}')
+                self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {resp.url}'))
                 if resp.status_code == 200:
                     doc = etree.HTML(resp.text)
                     tr_list = doc.xpath(r'//table[@id="tbl_proxy_list"]/tbody/tr')
@@ -1146,7 +1157,7 @@ class spider_proxy(object):
                     self.save_to_redis(proxy_list, ptype='proxy')
             return True
         except Exception as e:
-            self.logger.exception(str(e))
+            self.log_queue.put(log_exc(EXECPTION, str(e)))
         return False
 
     def get_proxy(self, ptype='all'):
@@ -1177,6 +1188,10 @@ class spider_proxy(object):
         参数信息:
             ptype : ss/ssr/v2ray/all
         '''
+        # 启动日志处理进程
+        mp.Process(name='proxy_getter',
+                   target=log_process, args=(self.log_queue, self.log_conf, 'proxy_getter',)).start()
+
         await self.get_proxy_async(ptype)
         self.get_proxy(ptype)
         return

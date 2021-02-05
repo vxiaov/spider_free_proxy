@@ -13,6 +13,6 @@
 #  ./bin/load.py -i all.txt -t table   # 将all.txt中所有代理导入到对应的xxx_table中
 #
 
-awk '/de/ && /start_check_socks5/ { split($15,stype, "_"); split($23, server, ":"); printf("%s %s:%s", stype[1],server[2], server[3]); for(i=26;i<NF;i++) printf(" %s", $i); printf("\n"); }' $* |sort -u
+awk '/INFO/ && /del/ && /start_check_socks5/ { split($12,stype, "_"); split($16, server, ":"); printf("%s %s:%s", stype[1],server[2], server[3]); for(i=19;i<NF;i++) printf(" %s", $i); printf("\n"); }' $* |sort -u
 
 

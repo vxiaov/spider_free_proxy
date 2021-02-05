@@ -43,7 +43,7 @@ if __name__ == '__main__':
 
     parser.add_argument('-i', '--init', default='all.txt',
                         help='设置导入文件路径')
-    parser.add_argument('-t', '--ttype', default='history',
+    parser.add_argument('-t', '--ttype', default='table',
                         choices=['history', 'table'], help='设置表类型')
     parse_result = parser.parse_args()
     init_file = parse_result.init
@@ -54,4 +54,3 @@ if __name__ == '__main__':
         exit(1)
     load_data(init_file, ttype)
 #
-
