@@ -196,6 +196,9 @@ def load_config(conf_file):
     conf['proxy'] = config['proxy']['proxy']
     conf['check_url'] = config['check']['check_url']
     conf['max_proc'] = config['check']['max_proc']
+    conf['sleep_getter'] = config['check']['sleep_getter']
+    conf['sleep_checker'] = config['check']['sleep_checker']
+    
     conf['profile'] = config['proxy']['profile']
 
     conf['log_conf'] = config['logging']['log_conf']
@@ -258,6 +261,8 @@ class spider_proxy(object):
                 self.port[ptype] = self.port_start + int(self.max_num['ss']) + int(self.max_num['ssr'])
         self.check_url = config['check_url']
         self.max_proc = int(config['max_proc'])
+        self.sleep_checker = int(config['sleep_checker'])
+        self.sleep_getter = int(config['sleep_getter'])
         self.timeout = 10  # requests 请求超时时间
         self.headers = {
             'user-agent': 'Mozilla/5.0 (NT; Windows x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'
@@ -609,7 +614,7 @@ class spider_proxy(object):
             # 等待并发启动服务执行结束
             for p in proc_list:
                 p.join()
-            time.sleep(30)
+            time.sleep(self.sleep_checker)
         return
 
     def save_to_redis(self, data_list, ptype='ss'):
@@ -1191,9 +1196,10 @@ class spider_proxy(object):
         # 启动日志处理进程
         mp.Process(name='proxy_getter',
                    target=log_process, args=(self.log_queue, self.log_conf, 'proxy_getter',)).start()
-
-        await self.get_proxy_async(ptype)
-        self.get_proxy(ptype)
+        while True:
+            await self.get_proxy_async(ptype)
+            self.get_proxy(ptype)
+            time.sleep(self.sleep_getter)
         return
 
 
