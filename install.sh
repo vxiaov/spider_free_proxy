@@ -82,12 +82,12 @@ compile_simple_obfs(){
 install_ss(){
     sudo ${pac_cmd_install} shadowsocks-libev
     [[ "$?" = "0" ]] || echo "安装 shadowsocks-libev 失败！请手动安装。"
-    which ss-local >/dev/null  && { echo "测试结果：找不到 ss-local 命令， 安装 ss-local 失败！" ; return 1 }
+    which ss-local >/dev/null  && ( echo "测试结果：找不到 ss-local 命令， 安装 ss-local 失败！" ; return 1 ; ) 
     echo "测试结果： ss-local 命令可用，安装 shadowsocks-libev 成功。"
 
     sudo ${pac_cmd_install} simple-obfs
-    [[ "$?" = "0" ]] || { echo "安装 simple-obfs 失败！" &&  compile_simple_obfs }
-    which obfs-local >/dev/null  && { echo "测试结果：找不到 obfs-local 命令， 安装 obfs-local 失败！" ; return 1 }
+    [[ "$?" = "0" ]] || ( echo "安装 simple-obfs 失败！" &&  compile_simple_obfs ) 
+    which obfs-local >/dev/null  && ( echo "测试结果：找不到 obfs-local 命令， 安装 obfs-local 失败！" ; return 1 ; )
     echo "测试结果： obfs-local 命令可用，安装 simple-obfs 成功。"
 }
 
@@ -109,7 +109,7 @@ compile_ssr_native(){
 }
 
 install_ssr(){
-    which ssr-client >/dev/null && { echo "ssr-client 已经安装成功了！"; return 0; }
+    which ssr-client >/dev/null && ( echo "ssr-client 已经安装成功了！"; return 0; )
     
     if [ "$os_type" = "raspbian" ] ; then
         compile_ssr_native
@@ -118,12 +118,12 @@ install_ssr(){
         unzip -o -d ${tmpdir} ssr-native-linux-x64.zip
         sudo cp -pf ${tmpdir}/ssr-client /usr/bin/
     fi
-    which ssr-client >/dev/null || { echo "验证结果：安装失败！ 找不到 ssr-client 命令!" ;  return 1 ; }
+    which ssr-client >/dev/null || ( echo "验证结果：安装失败！ 找不到 ssr-client 命令!" ;  return 1 ; )
     echo "验证结果： 安装成功！ 找到了 `which ssr-client` 命令！"
 }
 
 install_v2ray(){
-    which v2ray >/dev/null && { echo "v2ray 已经安装成功了!" ; return 0; }
+    which v2ray >/dev/null && ( echo "v2ray 已经安装成功了!" ; return 0; )
 
     if [ ! -f v2ray-linux-64.zip ] ; then
         wget -c https://github.com/v2ray/dist/raw/master/v2ray-linux-64.zip
@@ -173,9 +173,9 @@ start_haproxy(){
 }
 
 install_redis(){
-    which redis-server >/dev/null && { echo "redis 已经安装成功！不需要再安装了！" ; return 0; }
+    which redis-server >/dev/null && ( echo "redis 已经安装成功！不需要再安装了！" ; return 0; )
     sudo ${pac_cmd_install} redis-server
-    which redis-server >/dev/null || { echo "redis 安装失败！" ; return 1; }
+    which redis-server >/dev/null || ( echo "redis 安装失败！" ; return 1; )
     echo "redis-server 安装成功！"
 }
 
