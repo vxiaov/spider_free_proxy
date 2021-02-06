@@ -173,7 +173,8 @@ config_haproxy(){
     # generate socks5 server list info
     server_list_info=`awk 'BEGIN{for(i=0;i<=200;i++)printf("\tserver  socks5_%03d 127.0.0.1:%d check\n", i, 20000+i); }'`
 
-    cat <<END | sudo tee $dest_file
+    echo "更新 $dest_file 配置文件"
+    cat <<END | sudo tee $dest_file   >/dev/null
 global
     log /dev/log daemon
     maxconn 32768
@@ -250,23 +251,27 @@ END
 start_haproxy(){
     echo "start haproxy..."
     sudo systemctl enable haproxy
-    sudo systemctl start haproxy
+    sudo systemctl restart haproxy
     echo "---------------------------------------------------------"
     echo "    default webUI url: http://localhost:19999/haproxy?stats"
     echo "---------------------------------------------------------"
 }
 
 install_redis(){
-    which redis-server >/dev/null && ( echo "redis 已经安装成功！不需要再安装了！" ; return 0; )
+    which redis-server >/dev/null && echo "redis 已经安装成功！不需要再安装了！" && return 0
     sudo ${pac_cmd_install} redis-server
-    which redis-server >/dev/null || ( echo "redis 安装失败！" ; return 1; )
-    echo "redis-server 安装成功！"
+    if which redis-server >/dev/null ; then 
+        echo "redis-server 安装成功！"
+    else
+        echo "redis-server 安装失败！"
+        return 1
+    fi
 }
 
 start_redis(){
     echo "start redis..."
     sudo systemctl enable redis
-    sudo systemctl start redis
+    sudo systemctl restart redis
     echo "---------------------------------------------------------"
     echo "  Redis 服务已启动！ 可以使用 redis-cli 命令连接测试 "
     echo "---------------------------------------------------------"
