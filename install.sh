@@ -285,6 +285,7 @@ config_spider(){
     sudo pip3.9 install -r requirements.txt
     # 设置工作目录
     wkdir=`pwd`
+    cp start.template.sh start.sh
     sed -i "s#^workdir=.*#workdir=${wkdir}#g" start.sh
     for tmpdir in "running" "log"
     do
