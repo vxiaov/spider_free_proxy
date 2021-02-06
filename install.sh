@@ -277,12 +277,14 @@ config_spider(){
     py_ver=`python3 -V | awk '{ print $2 }' | sed 's/\.//g'`
     if [ "$py_ver" -lt "360" ] ; then
         echo "Python 版本低于3.6.0，请升级！"
-        wget -c https://www.python.org/ftp/python/3.9.1/Python-3.9.1.tgz
-        tar zxvf Python-3.9.1.tgz
-        cd Python-3.9.1/ && ./configure --enable-optimizations --with-lto && make -j$(nproc) && sudo make install && cd ../
+        p_ver='3.9.1'
+        wget -c https://www.python.org/ftp/python/${p_ver}/Python-${p_ver}.tgz
+        tar zxvf Python-${p_ver}.tgz
+        cd Python-${p_ver}/ && ./configure --enable-optimizations --with-lto && make -j$(nproc) && sudo make install && cd ../
+        export PATH=/usr/local/bin:$PATH
     fi
     
-    sudo pip3.9 install -r requirements.txt
+    sudo pip3 install -r requirements.txt
     # 设置工作目录
     wkdir=`pwd`
     cp start.template.sh start.sh
@@ -299,7 +301,7 @@ config_spider(){
     conf_file="./conf/default_ssr.conf"
     exp_file="exp.list"
     wget -O $exp_file ${order_url}
-    python3.9 ./bin/load.py -i $exp_file -t table     # 导入有效代理列表
+    python3 ./bin/load.py -i $exp_file -t table     # 导入有效代理列表
 
     echo "开始启动代理检测服务"
     ./start.sh -c all   # 第一次验证有效并启动有效代理
