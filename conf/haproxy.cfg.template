@@ -1,0 +1,69 @@
+global
+    log /dev/log daemon
+    maxconn 32768
+    chroot /var/lib/haproxy
+    user haproxy
+    group haproxy
+    daemon
+    tune.bufsize 32768
+    tune.ssl.default-dh-param 2048
+    ssl-default-bind-ciphers ALL:!aNULL:!eNULL:!EXPORT:!DES:!3DES:!MD5:!PSK:!RC4:!ADH:!LOW@STRENGTH
+
+    stats socket /var/lib/haproxy/stats user haproxy group haproxy mode 0640 level operator
+    stats socket ipv4@127.0.0.1:9999 level admin
+    stats socket /var/lib/haproxy/stats mode 0640 level admin
+    stats timeout 2m
+
+defaults
+    mode                    tcp
+    log                     global
+    option                  httplog
+    option                  dontlognull
+    option                  http-server-close
+    option                  redispatch
+    retries                 3
+    timeout http-request    10s
+    timeout queue           1m
+    timeout connect         10s
+    timeout client          1m
+    timeout server          1m
+    timeout http-keep-alive 10s
+    timeout check           10s
+    maxconn                 3000
+
+# HAProxy 前端服务
+frontend socks5_frontend
+    bind    0.0.0.0:1084
+    mode    tcp
+    option tcplog
+    timeout client  30s
+    default_backend socks5_backend
+
+# HAProxy 后端服务节点的负载均衡配置
+backend socks5_backend
+    mode    tcp
+    option log-health-checks
+    balance leastconn
+    timeout server  30s
+    timeout connect 10s
+{server_list_info}
+
+# HAProxy web ui: http://localhost:19999/haproxy?stats
+listen stats
+    bind 0.0.0.0:19999
+    mode http
+    log global
+
+    maxconn 10
+    timeout client 100s
+    timeout server 100s
+    timeout connect 100s
+    timeout queue 100s
+
+    stats enable
+    stats uri /haproxy?stats
+    stats hide-version
+    stats realm HAProxy\ Statistics
+    stats admin if TRUE
+    stats show-node
+

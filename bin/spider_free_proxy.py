@@ -6,7 +6,6 @@
 # Created Time: 2020年08月29日 星期六 23时50分36秒
 # Brief:
 ###############################################################################
-# 无头模式，通过JS屏蔽`webdriver`检测
 
 import json
 import base64
@@ -15,9 +14,7 @@ import re
 import time
 import socket
 import argparse
-import asyncio
 import requests
-from pyppeteer import DEBUG, launch
 from lxml import etree
 from urllib.parse import urlparse, parse_qs, unquote
 from multiprocessing.dummy import Pool as ThreadPool
@@ -33,7 +30,6 @@ if __name__ == '__main__':
     from utils import *
 
 ua = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'
-js0 = '''() =>{Object.defineProperty(navigator, 'webdriver', {get: () => undefined });}'''
 
 
 def b64pading(enc):
@@ -658,96 +654,6 @@ class spider_proxy(object):
         self.log_queue.put(log_exc(INFO, f"redis ptype: {ptype}: total: {total} :loaded: {count} :doer {doer} :invalid {invalid}"))
         return True
 
-    async def get_browser(self, headless=True, use_proxy=False, autoClose=True):
-        '''获取浏览器页面对象'''
-        # browser_args = ['--disable-infobars', '--no-sandbox', '--disable-setuid-sandbox']
-        browser_args = ['--disable-infobars']
-        if self.use_proxy:
-            proxy_server = "--proxy-server=" + config['proxy']
-            browser_args.append(proxy_server)
-        self.log_queue.put(log_exc(DEBUG, browser_args))
-        # headless参数设为False，则变成有头模式
-        user_dir = self.profile
-        browser = await launch(headless=headless, args=browser_args, logLevel='DEBUG', userDataDir=user_dir, autoClose=autoClose)
-        self.log_queue.put(log_exc(DEBUG, browser))
-        pages = await browser.pages()
-        page = pages[0]
-        # 设置页面视图大小
-        await page.setViewport(viewport={'width': 1280, 'height': 800})
-        await page.setUserAgent(ua)
-        await page.evaluateOnNewDocument(js0)
-        return page
-
-    async def get_proxy_ss_freess(self, page):
-        '''
-        SS proxy spider SS_JSON: main_url = "https://free-ss.site/"
-        '''
-        main_url = "https://free-ss.site/"
-        await page.goto(main_url)
-        await page.waitForXPath(r'//table[@id="tbss"]/tbody/tr')
-        page_text = await page.content()
-        # 解析章节列表
-        tree = etree.HTML(page_text)
-        tr_list = tree.xpath('//table[@id="tbss"]/tbody/tr')
-
-        ss_list = []
-        total = 0
-        for tr in tr_list:
-            total += 1
-            item = tr.xpath('./td/text()')
-            ss = self.set_ss(item[1], item[2], item[3], item[4])
-            ss_list.append(ss)
-        self.log_queue.put(log_exc(INFO, f'url: {main_url}, {len(ss_list)}'))
-        # 存储代理信息
-        self.save_to_redis(ss_list, ptype='ss')
-        return ss_list
-
-    async def get_proxy_ssrtool(self, page):
-        '''ssrtool免费分享的SSR'''
-        # base_url = 'https://www.ssrtool.com'
-        # base_url = 'https://usky.ml'
-        base_url = 'https://ssrtool.us'
-        main_url = base_url + '/tool/free_ssr'
-        api_url = base_url + '/tool/api/free_ssr?page=1&limit=30'
-        await page.goto(main_url, timeout=60*1000)
-        await page.waitForXPath(r'//table[@class="layui-table"]/tbody/tr', timeout=60*1000)
-        await page.goto(api_url)
-        page_text = await page.evaluate('''() =>  {return JSON.parse(document.querySelector("body").innerText);}''')
-        data_list = page_text['data']
-        ssr_list = []
-        ssr_keys = ['server', 'server_port', 'method', 'password', 'protocol', 'obfs', 'obfsparam', 'protocolparam', 'remarks', 'group', 'country']
-        for data in data_list:
-            conf_json = {}
-            for key in ssr_keys:
-                conf_json[key] = data.get(key, "")
-            ssr_list.append(conf_json)
-        # 存储代理信息
-        self.save_to_redis(ssr_list, ptype='ssr')
-        return ssr_list
-
-    async def get_proxy_async(self, ptype='all'):
-        '''
-        爬取代理任务
-        参数信息:
-            ptype : ss/ssr/v2ray
-        '''
-        headless = True if ptype != 'test' else False
-        page = await self.get_browser(headless=headless)
-
-        if ptype == 'test':
-            print('单元测试')
-            await self.get_proxy_ssrtool(page)
-
-        elif ptype in ['ssr', 'all']:
-            try:
-                await self.get_proxy_ssrtool(page)
-            except Exception as e:
-                self.log_queue.put(log_exc(EXECPTION, str(e)))
-
-        elif ptype in ['ss', 'all']:
-            await self.get_proxy_ss_freess(page)
-        return
-
     def get_proxy_from_rss_uri(self):
         '''
         免费订阅源: ss/ssr/vmess base64 uri
@@ -760,7 +666,6 @@ class spider_proxy(object):
             'https': f'{socks_server}'
         }
         order_ssr_list = [
-            # 'https://raw.githubusercontent.com/ntkernel/lantern/master/vmess_base64.txt',
             'https://qiaomenzhuanfx.netlify.app/',
             'https://muma16fx.netlify.app/',
             'https://youlianboshi.netlify.app/',
@@ -770,7 +675,6 @@ class spider_proxy(object):
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/online',
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/recent',
             'http://ss.pythonic.life/subscribe',
-            # 'https://prom-php.herokuapp.com/cloudfra_ssr.txt',
         ]
         ssr_list = []
         ss_list = []
@@ -1187,21 +1091,14 @@ class spider_proxy(object):
             self.get_proxy_socks_proxynova()
         return
 
-    async def start(self, ptype='all'):
-        '''
-        执行所有的爬取代理任务
-        参数信息:
-            ptype : ss/ssr/v2ray/all
-        '''
+    def start_getter(self, ptype):
         # 启动日志处理进程
         mp.Process(name='proxy_getter',
                    target=log_process, args=(self.log_queue, self.log_conf, 'proxy_getter',)).start()
         while True:
-            await self.get_proxy_async(ptype)
             self.get_proxy(ptype)
             time.sleep(self.sleep_getter)
         return
-
 
 if __name__ == '__main__':
 
@@ -1210,13 +1107,11 @@ if __name__ == '__main__':
 
     parser.add_argument('-i', '--init', default='config.ini', help='运行初始化配置文件')
     parser.add_argument('-c', '--check', default=None, choices=proxy_types, help='运行代理可用性检测器')
-    parser.add_argument('-r', '--run', default=None, choices=proxy_types, help='运行代理提取器-普通版')
-    parser.add_argument('-p', '--proxy', default="all", choices=proxy_types, help='运行代理提取器-异步版')
+    parser.add_argument('-p', '--proxy', default=None, choices=proxy_types, help='运行代理提取器')
 
     parse_result = parser.parse_args()
     init = parse_result.init
     check = parse_result.check
-    run = parse_result.run
     proxy = parse_result.proxy
 
     config = load_config(init)
@@ -1228,10 +1123,8 @@ if __name__ == '__main__':
         print("start to check proxy:")
         spider.start_check(ptype=check)
 
-    elif run:
-        print("start to get_proxy:")
-        spider.get_proxy(run)
-
     elif proxy:
-        print("start to get_proxy_async:", proxy)
-        asyncio.get_event_loop().run_until_complete(spider.start(proxy))
+        print("start to get_proxy:")
+        spider.start_getter(proxy)
+    else:
+        print("啥事儿也没干!")
