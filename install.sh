@@ -67,14 +67,11 @@ check_sys() {
 compile_simple_obfs(){
     echo "开始编译 simple-obfs 源码安装!"
     sudo ${pac_cmd_install} --no-install-recommends build-essential autoconf libtool libssl-dev libpcre3-dev libev-dev asciidoc xmlto automake git
-    git clone -–depth=1 --shallow-submodules https://github.com/shadowsocks/simple-obfs.git
+    git clone --depth=1 --shallow-submodules https://github.com/shadowsocks/simple-obfs.git
     cd simple-obfs
-    git submodule update --init --recursive
-    ./autogen.sh
-    ./configure && make
-    sudo make install
+    git submodule update --init --recursive && ./autogen.sh  && ./configure && make && sudo make install
     echo "编译安装 simple-obfs 完成！"
-
+    cd ../
 }
 
 
@@ -95,16 +92,19 @@ compile_ssr_native(){
     echo "开始编译 ssr-client 源代码！ 编译过程依据网络差异会需要持续一段时间(5分钟内)，请耐心等待..."
     sudo ${pac_cmd_install} --no-install-recommends build-essential autoconf libtool asciidoc xmlto
     sudo ${pac_cmd_install} git gcc g++ gdb cmake automake
-    git clone https://github.com/ShadowsocksR-Live/shadowsocksr-native.git
-    mv shadowsocksr-native ssr-n  # rename shadowsocksr-native to ssr-n
-    cd ssr-n                      # enter ssr-n directory. 
+    
+    if [ ! -r "$ssr-n" ] ; then
+        git clone https://github.com/ShadowsocksR-Live/shadowsocksr-native.git
+        mv shadowsocksr-native ssr-n
+    fi
+    cd ssr-n
     git submodule update --init
     git submodule foreach -q 'git checkout $(git config -f $toplevel/.gitmodules submodule.$name.branch || echo master)'
 
     # build ShadowsocksR-native
-    mkdir build && cd build
-    cmake .. && make
-    sudo cp -f src/ssr-* /usr/bin
+    mkdir -p build
+    cd build && cmake .. && make && sudo cp -f src/ssr-* /usr/bin && cd ../
+    cd ../
     echo "编译安装完成"
 }
 
@@ -125,7 +125,12 @@ install_ssr(){
 install_v2ray(){
     which v2ray >/dev/null && ( echo "v2ray 已经安装成功了!" ; return 0; )
 
-    if [ ! -f v2ray-linux-64.zip ] ; then
+    if [ "$os_type" = "raspbian" ] ; then
+        if [ ! -f v2ray-linux-arm32-v7a.zip ] ; then
+            wget -c https://github.com/v2fly/v2ray-core/releases/download/v4.31.0/v2ray-linux-arm32-v7a.zip
+        fi
+        unzip -o -d ${tmpdir} v2ray-linux-arm32-v7a.zip
+    elif [ ! -f v2ray-linux-64.zip ] ; then
         wget -c https://github.com/v2ray/dist/raw/master/v2ray-linux-64.zip
         unzip -o -d ${tmpdir} v2ray-linux-64.zip
     fi
