@@ -61,7 +61,7 @@ if __name__ == '__main__':
     parse_result = parser.parse_args()
     file_name = parse_result.file
     stype = parse_result.stype
-    max_num = parse_result.num
+    max_num = int(parse_result.num)
 
     print(stype, file_name)
     exp_data(stype, file_name, max_num)
