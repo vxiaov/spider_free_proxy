@@ -292,7 +292,10 @@ config_spider(){
     sudo pip3 install -r requirements.txt
     # 设置工作目录
     wkdir=`pwd`
-    cp start.template.sh start.sh
+    # 生成启动脚本和配置文件
+    cp -f start.template.sh start.sh
+    cp -f conf/config.ini.template conf/config.ini
+    cp -f conf/logging.conf.template conf/logging.conf
     sed -i "s#^workdir=.*#workdir=${wkdir}#g" start.sh
     for tmpdir in "running" "log"
     do

@@ -12,7 +12,7 @@ port_start = 20000
 port_num = 100,10,10
 
 [template]
-v2ray_template = ./conf/v2ray.template.json
+v2ray_template = ./conf/v2ray.json.template
 
 [database]
 redis_uri = redis://localhost:6379/1
