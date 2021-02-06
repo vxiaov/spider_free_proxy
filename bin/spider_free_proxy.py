@@ -194,7 +194,7 @@ def load_config(conf_file):
     conf['max_proc'] = config['check']['max_proc']
     conf['sleep_getter'] = config['check']['sleep_getter']
     conf['sleep_checker'] = config['check']['sleep_checker']
-    
+
     conf['profile'] = config['proxy']['profile']
 
     conf['log_conf'] = config['logging']['log_conf']
@@ -493,7 +493,7 @@ class spider_proxy(object):
         for _ in check_tcp_results:
             orig_ip, ip, port, status = _
             if not status:
-                
+
                 self.log_queue.put(
                     log_exc(
                         DEBUG, f' SERVICE_ERROR, 服务[{ip}:{port}]已经不可访问, 可能服务进程异常终止了.'))
@@ -573,7 +573,7 @@ class spider_proxy(object):
                     rdel = redis.hdel(rtable, local_port)
                     log_msg = f'新启动代理无效: 端口: {local_port} server: {socks_id}, {stable} delete {sdel} , {rtable} delete {rdel}.'
                     self.log_queue.put(log_exc(DEBUG, log_msg))
-                    
+
                 else:
                     # 有效代理
                     log_msg = f'SUCCESS: 端口: {local_port} 代理运行成功: {socks_id}'
@@ -1099,6 +1099,7 @@ class spider_proxy(object):
             self.get_proxy(ptype)
             time.sleep(self.sleep_getter)
         return
+
 
 if __name__ == '__main__':
 

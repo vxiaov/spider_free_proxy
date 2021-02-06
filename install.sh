@@ -85,6 +85,13 @@ install_ss(){
         echo "测试结果：找不到 ss-local 命令， 安装 ss-local 失败！" 
     fi
 
+    if which obfs-local >/dev/null ; then
+        echo "obfs-local 命令已经安装成功。"
+        return 0
+    else
+        echo "找不到 obfs-local 命令， 开始安装 obfs-local："
+    fi
+
     sudo ${pac_cmd_install} simple-obfs
     [[ "$?" = "0" ]] || compile_simple_obfs
     if which obfs-local >/dev/null ; then
