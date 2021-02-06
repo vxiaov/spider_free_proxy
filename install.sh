@@ -16,7 +16,7 @@ pac_cmd_update=""   # 软件源缓存更新
 cpu_arc=""  # CPU架构类型，仅支持x86_64
 tmpdir="/tmp/proxy"
 ssr_ver="0.9.0"     # ssr-native 版本号
-
+basic_package="unzip wget "
 
 check_sys() {
     if [ -f /etc/os-release ] ; then
@@ -27,24 +27,28 @@ check_sys() {
                 pac_cmd="yum"
                 pac_cmd_update="$pac_cmd update -y"
                 pac_cmd_install="$pac_cmd install -y"
+                basic_package="$basic_package libxml2-devel libxslt-devel"
                 ;;
             opensuse*)
                 os_type="$ID"
                 pac_cmd="zypper"
                 pac_cmd_update="$pac_cmd update -y"
                 pac_cmd_install="$pac_cmd install -y"
+                basic_package="$basic_package libxml2-devel libxslt-devel"
                 ;;
             ubuntu|debian|raspbian)
                 os_type="$ID"
                 pac_cmd="apt-get"
                 pac_cmd_update="$pac_cmd update -y"
                 pac_cmd_install="$pac_cmd install -y"
+                basic_package="$basic_package libxml2-dev libxslt1-dev"
                 ;;
             manjaro|arch*)
                 os_type="$ID"
                 pac_cmd="pacman"
                 pac_cmd_update="$pac_cmd -Sy"
                 pac_cmd_install="$pac_cmd -S --needed --noconfirm "
+                basic_package="$basic_package libxml2-dev libxslt1-dev"
                 ;;
             *)
                 os_type="unknown"
@@ -270,7 +274,15 @@ start_redis(){
 
 # 配置代理爬虫环境，初始化运行
 config_spider(){
-    sudo pip3 install -r requirements.txt
+    py_ver=`python3 -V | awk '{ print $2 }' | sed 's/\.//g'`
+    if [ "$py_ver" -lt "360" ] ; then
+        echo "Python 版本低于3.6.0，请升级！"
+        wget -c https://www.python.org/ftp/python/3.9.1/Python-3.9.1.tgz
+        tar zxvf Python-3.9.1.tgz
+        cd Python-3.9.1/ && ./configure --enable-optimizations --with-lto && make -j$(nproc) && sudo make install && cd ../
+    fi
+    
+    sudo pip3.9 install -r requirements.txt
     # 设置工作目录
     wkdir=`pwd`
     sed -i "s#^workdir=.*#workdir=${wkdir}#g" start.sh
@@ -286,7 +298,7 @@ config_spider(){
     conf_file="./conf/default_ssr.conf"
     exp_file="exp.list"
     wget -O $exp_file ${order_url}
-    python3 ./bin/load.py -i $exp_file -t table     # 导入有效代理列表
+    python3.9 ./bin/load.py -i $exp_file -t table     # 导入有效代理列表
 
     echo "开始启动代理检测服务"
     ./start.sh -c all   # 第一次验证有效并启动有效代理
@@ -301,7 +313,7 @@ config_spider(){
 main(){
 
     sudo $pac_cmd_update
-    sudo ${pac_cmd_install} unzip wget
+    sudo ${pac_cmd_install} ${basic_package}
     install_ss
     install_ssr
     install_v2ray
