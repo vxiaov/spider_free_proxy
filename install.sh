@@ -27,28 +27,21 @@ check_sys() {
                 pac_cmd="yum"
                 pac_cmd_update="$pac_cmd update -y"
                 pac_cmd_install="$pac_cmd install -y"
-                basic_package="$basic_package libxml2-devel libxslt-devel"
+                basic_package="$basic_package libxml2-devel libxslt-devel gettext gcc autoconf libtool automake make asciidoc xmlto c-ares-devel libev-devel"
                 ;;
             opensuse*)
                 os_type="$ID"
                 pac_cmd="zypper"
                 pac_cmd_update="$pac_cmd update -y"
                 pac_cmd_install="$pac_cmd install -y"
-                basic_package="$basic_package libxml2-devel libxslt-devel"
+                basic_package="$basic_package libxml2-devel libxslt-devel gettext gcc autoconf libtool automake make asciidoc xmlto c-ares-devel libev-devel"
                 ;;
             ubuntu|debian|raspbian)
                 os_type="$ID"
                 pac_cmd="apt-get"
                 pac_cmd_update="$pac_cmd update -y"
                 pac_cmd_install="$pac_cmd install -y"
-                basic_package="$basic_package libxml2-dev libxslt1-dev"
-                ;;
-            manjaro|arch*)
-                os_type="$ID"
-                pac_cmd="pacman"
-                pac_cmd_update="$pac_cmd -Sy"
-                pac_cmd_install="$pac_cmd -S --needed --noconfirm "
-                basic_package="$basic_package libxml2-dev libxslt1-dev"
+                basic_package="$basic_package libxml2-dev libxslt1-dev gettext build-essential autoconf libtool libpcre3-dev asciidoc xmlto libev-dev libc-ares-dev automake libmbedtls-dev"
                 ;;
             *)
                 os_type="unknown"
@@ -68,6 +61,8 @@ check_sys() {
     return 0
 }
 
+## 1. 安装客户端命令
+
 compile_simple_obfs(){
     echo "开始编译 simple-obfs 源码安装!"
     sudo ${pac_cmd_install} --no-install-recommends build-essential autoconf libtool libssl-dev libpcre3-dev libev-dev asciidoc xmlto automake git
@@ -78,31 +73,62 @@ compile_simple_obfs(){
     cd ../
 }
 
-
-## 1. 安装客户端命令
-install_ss(){
-    sudo ${pac_cmd_install} shadowsocks-libev
-    if which ss-local >/dev/null
-    then
-        echo "测试结果： ss-local 命令可用，安装 shadowsocks-libev 成功。"
-    else
-        echo "测试结果：找不到 ss-local 命令， 安装 ss-local 失败！" 
-    fi
-
+install_simple_obfs(){
     if which obfs-local >/dev/null ; then
         echo "obfs-local 命令已经安装成功。"
         return 0
     else
         echo "找不到 obfs-local 命令， 开始安装 obfs-local："
+        sudo ${pac_cmd_install} simple-obfs
+        [[ "$?" = "0" ]] || compile_simple_obfs
+        if which obfs-local >/dev/null ; then
+            echo "测试结果： obfs-local 命令可用，安装 simple-obfs 成功。"
+        else
+            echo "测试结果：找不到 obfs-local 命令， 安装 obfs-local 失败！"
+            compile_simple_obfs
+            if which obfs-local >/dev/null ; then
+                echo "测试结果： obfs-local 命令可用，源码安装 simple-obfs 成功。"
+            else
+                echo "测试结果：找不到 obfs-local 命令， 真糟糕！源码安装 obfs-local 失败！ "
+            fi
+        fi
     fi
 
-    sudo ${pac_cmd_install} simple-obfs
-    [[ "$?" = "0" ]] || compile_simple_obfs
-    if which obfs-local >/dev/null ; then
-        echo "测试结果： obfs-local 命令可用，安装 simple-obfs 成功。"
+}
+
+install_ss(){
+    if which ss-local >/dev/null ; then
+        echo "ss-local 命令可用，shadowsocks-libev 已经安装成功。"
     else
-        echo "测试结果：找不到 obfs-local 命令， 安装 obfs-local 失败！"
+        echo "找不到 ss-local 命令， 开始安装 shadowsocks-libev :"
+        sudo ${pac_cmd_install} shadowsocks-libev
     fi
+
+    if ss-local -h  |grep xchacha20-ietf-poly1305 >/dev/null ; then
+        echo "当前 shadowsocks-libev 支持 xchacha20-ietf-poly1305 加密算法，不需要源码编译了"
+    else
+        echo "当前 shadowsocks-libev 不支持 xchacha20-ietf-poly1305 加密算法"
+        compile_shadowsocks
+    fi
+
+}
+
+compile_shadowsocks(){
+    # 为什么要编译 shadowsocks-libev 呢？
+    # 因为libsodium库版本过低会出现一些加密算法不识别问题，升级libsodium后，需要重新编译 shadowsocks-libev 才可以让新版本库算法生效
+    echo "开始编译libsodium:"
+    sudo ${pac_cmd_install} --no-install-recommends gettext build-essential autoconf libtool libpcre3-dev asciidoc xmlto libev-dev libc-ares-dev automake libmbedtls-dev
+    git clone https://github.com/jedisct1/libsodium --branch stable
+    cd libsodium
+    ./configure && make -j$(nproc) && sudo make install
+    cd ../
+
+    echo "开始编译shadowsocks-libev:"
+    git clone https://github.com/shadowsocks/shadowsocks-libev.git
+    cd shadowsocks-libev
+    git submodule update --init --recursive
+    ./autogen.sh && ./configure && make -j$(nproc) && sudo make install
+    cd ../
 }
 
 compile_ssr_native(){
@@ -326,6 +352,7 @@ main(){
     sudo $pac_cmd_update
     sudo ${pac_cmd_install} ${basic_package}
     install_ss
+    install_simple_obfs
     install_ssr
     install_v2ray
 
