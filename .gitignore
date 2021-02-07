@@ -5,7 +5,10 @@ tags
 running/
 chrome_profile/
 log/
-exp.list
+*.list
+*.conf
+libsodium/
+shadowsocks-libev/
 simple-obfs/
 ssr-n/
 *.zip
