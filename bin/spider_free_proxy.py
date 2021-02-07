@@ -725,15 +725,12 @@ class spider_proxy(object):
         self.save_to_redis(ssr_list, ptype='ssr')
         return ssr_list
 
-    async def get_proxy_async(self, ptype='all'):
+    async def get_proxy_async(self, page, ptype='all'):
         '''
         爬取代理任务
         参数信息:
             ptype : ss/ssr/v2ray
         '''
-        headless = True if ptype != 'test' else False
-        page = await self.get_browser(headless=headless)
-
         if ptype == 'test':
             print('单元测试')
             await self.get_proxy_ssrtool(page)
@@ -760,17 +757,18 @@ class spider_proxy(object):
             'https': f'{socks_server}'
         }
         order_ssr_list = [
-            # 'https://raw.githubusercontent.com/ntkernel/lantern/master/vmess_base64.txt',
             'https://qiaomenzhuanfx.netlify.app/',
             'https://muma16fx.netlify.app/',
             'https://youlianboshi.netlify.app/',
+            'https://fforever.github.io/v2rayfree/',
             'https://raw.githubusercontent.com/ssrsub/ssr/master/ss-sub',
             'https://raw.githubusercontent.com/ssrsub/ssr/master/ssrsub',
             'https://raw.githubusercontent.com/ssrsub/ssr/master/v2ray',
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/online',
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/recent',
+            'https://raw.githubusercontent.com/voken100g/AutoSSR/master/stable',
             'http://ss.pythonic.life/subscribe',
-            # 'https://prom-php.herokuapp.com/cloudfra_ssr.txt',
+            'https://cdn.jsdelivr.net/gh/fggfffgbg/https-aishangyou.tube-@master/README.md',
         ]
         ssr_list = []
         ss_list = []
@@ -1196,8 +1194,12 @@ class spider_proxy(object):
         # 启动日志处理进程
         mp.Process(name='proxy_getter',
                    target=log_process, args=(self.log_queue, self.log_conf, 'proxy_getter',)).start()
+
+        headless = True if ptype != 'test' else False
+        page = await self.get_browser(headless=headless)
+
         while True:
-            await self.get_proxy_async(ptype)
+            await self.get_proxy_async(page, ptype)
             self.get_proxy(ptype)
             time.sleep(self.sleep_getter)
         return
