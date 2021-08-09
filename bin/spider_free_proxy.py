@@ -675,6 +675,9 @@ class spider_proxy(object):
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/online',
             'https://raw.githubusercontent.com/voken100g/AutoSSR/master/recent',
             'http://ss.pythonic.life/subscribe',
+            'https://sspool.herokuapp.com/sip002/sub',
+            'https://sspool.herokuapp.com/vmess/sub',
+            'https://sspool.herokuapp.com/ssr/sub',
         ]
         ssr_list = []
         ss_list = []
