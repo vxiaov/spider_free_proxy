@@ -6,7 +6,6 @@ running/
 chrome_profile/
 log/
 *.list
-*.conf
 libsodium/
 shadowsocks-libev/
 simple-obfs/
