@@ -320,8 +320,6 @@ config_spider(){
     wkdir=`pwd`
     # 生成启动脚本和配置文件
     cp -f start.template.sh start.sh
-    cp -f conf/config.ini.template conf/config.ini
-    cp -f conf/logging.conf.template conf/logging.conf
     sed -i "s#^workdir=.*#workdir=${wkdir}#g" start.sh
     for tmpdir in "running" "log"
     do

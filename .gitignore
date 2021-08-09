@@ -15,5 +15,3 @@ ssr-n/
 *.tgz
 *.tar.gz
 start.sh
-conf/config.ini
-conf/logging.conf
