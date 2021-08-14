@@ -5,12 +5,4 @@ tags
 running/
 chrome_profile/
 log/
-exp.list
-simple-obfs/
-ssr-n/
-*.zip
-*.tgz
-*.tar.gz
-start.sh
-conf/config.ini
-conf/logging.conf
+github/

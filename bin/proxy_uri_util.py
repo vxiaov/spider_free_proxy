@@ -216,6 +216,7 @@ def encode_vmess_uri(data):
 
     vmess_uri = {}
     vmess_uri['add'] = data['server']
+    vmess_uri['port'] = data['server_port']
     vmess_uri['aid'] = data.get('aid', 64)
     vmess_uri['id'] = data['uid']
     vmess_uri['net'] = data['network']

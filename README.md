@@ -28,6 +28,12 @@ sh ./config.sh
 ```sh
 ./bin/spider_free_proxy.py -p all  # 使用pyppetter方式使用无头浏览器爬虫
 ./bin/spider_free_proxy.py -c all  # ss/ssr/v2ray爬虫可用性服务检测与启动管理
+
+# 或者使用start.sh脚本启动
+
+./start.sh -p all   # 启动爬虫任务
+
+./start.sh -c all   # 启动代理服务维护任务
 ```
 
 ## `cron`调度配置
@@ -59,9 +65,19 @@ optional arguments:
 ```
 
 ## Redis代理数据导入导出工具
+> 有些代理信息是可以被回收利用的，因此历史代理数据可以通过以下方法进行导入和导出操作。
 
 ```sh
-$ ./bin/exp.py -f all.txt -t ss
-$ ./bin/load.py -i all.txt -t table   # 将all.txt中代理信息导入到 xxx_table中,all.txt格式为[type host_info  jsonline_detail_data]
+$ ./bin/exp.py -f all.txt -t ss       # 将代理信息从Redis数据库中导出
+
+$ ./bin/load.py -i all.txt -t table   # 将all.txt中代理信息导入到Redis数据库中名字为xxx_table的Hash表中,all.txt格式为[type host_info  jsonline_detail_data]
+
 $ ./bin/exp_log.sh ./log/proxy_spider.log > all.txt    # 用于解析处理日志中已经删除的历史代理信息，可以作为回收工具。
+
+$ ./load.sh     # 自动回收日志历史的代理并导入到Redis数据库中
+
 ```
+
+---
+
+

@@ -1,7 +1,22 @@
 #!/usr/bin/env bash
 
+echo "--------------------------------------"
+echo "检查启动的socks5客户端情况:"
 for item in "ss-local" "ssr-client" "v2ray"
 do
     num=`pgrep $item|wc -l`
     echo "$item : $num"
 done
+
+echo "--------------------------------------"
+echo "检查网络端口占用(无输出就是没有被占用):"
+echo ""
+ss -tanp | grep LISTEN|grep :20|grep -v v2ray |grep -v ss-local|grep -v ssr-client
+
+
+echo "--------------------------------------"
+echo "进程运行情况："
+ps -ef |grep bin/spider_free_proxy.py | grep -v grep
+echo ""
+echo "--------------------------------------"
+

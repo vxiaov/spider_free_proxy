@@ -34,7 +34,7 @@ if [ "$1" = ""  -o "$1" = "-h" ] ; then
 fi
 
 venv_name="spider"
-workdir=/path/to/spider_free_proxy
+workdir=/apps/code/github/my/spider_free_proxy
 cd $workdir
 
 conf_file="./conf/config.ini"
@@ -65,7 +65,7 @@ run_cmd()
         fi
     done
 
-    . PYTHON_PATH/etc/profile.d/conda.sh
+    . /apps/python/anaconda3/etc/profile.d/conda.sh
     conda activate $venv_name
 
     if [ "$1" = "cron" ] ; then
