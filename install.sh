@@ -319,8 +319,6 @@ config_spider(){
     # 设置工作目录
     wkdir=`pwd`
     # 生成启动脚本和配置文件
-    cp -f start.template.sh start.sh
-    sed -i "s#^workdir=.*#workdir=${wkdir}#g" start.sh
     for tmpdir in "running" "log"
     do
         if [ ! -r $tmpdir ] ; then

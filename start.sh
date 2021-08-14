@@ -30,8 +30,6 @@ if [ "$1" = ""  -o "$1" = "-h" ] ; then
     exit 0
 fi
 
-workdir=/path/to/spider_free_proxy
-cd $workdir
 
 conf_file="./conf/config.ini"
 
@@ -51,5 +49,5 @@ run_cmd()
 }
 
 # 单任务执行
-cmd="${workdir}/bin/spider_free_proxy.py --init ${conf_file} $@"
+cmd="./bin/spider_free_proxy.py --init ${conf_file} $@"
 run_cmd "$cmd"
