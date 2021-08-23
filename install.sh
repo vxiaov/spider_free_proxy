@@ -61,6 +61,21 @@ tmpdir="/tmp/proxy"
 ## 1. 安装客户端命令
 install_ss(){
 	${pac_cmd_ins} shadowsocks-libev  simple-obfs
+	which ss-local >/dev/null
+	if [ "$?" = "0" ] ; then
+		echo "ss-local is already installed !"
+		return 0
+	fi
+	# CentOS 源码编译
+	yum install epel-release -y
+	yum install gcc gettext autoconf libtool automake make pcre-devel asciidoc xmlto c-ares-devel libev-devel libsodium-devel mbedtls-devel -y
+	wget -c https://github.com/shadowsocks/shadowsocks-libev/releases/download/v3.3.5/shadowsocks-libev-3.3.5.tar.gz
+	tar zxf shadowsocks-libev-3.3.5.tar.gz && cd shadowsocks-libev-3.3.5 && ./autogen.sh && ./configure && make && make install
+	which ss-local >/dev/null
+	if [ "$?" = "0" ] ; then
+		echo "ss-local cannot be installed , you need to check reason!"
+		return 1
+	fi
 }
 
 
