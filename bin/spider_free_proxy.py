@@ -529,7 +529,6 @@ class spider_proxy(object):
         for _ in check_tcp_results:
             orig_ip, ip, port, status = _
             if not status:
-
                 self.log_queue.put(
                     log_exc(
                         DEBUG, f' SERVICE_ERROR, 服务[{ip}:{port}]已经不可访问, 可能服务进程异常终止了.'))
@@ -596,7 +595,7 @@ class spider_proxy(object):
             p.start()
             if p:
                 if ptype == 'v2ray':
-                    time.sleep(0.8)  # 等待服务启动过程 #
+                    time.sleep(0.5)  # 等待服务启动过程 #
                 socks_addr = local_addr + str(local_port)
                 socks_proxy = {'host': socks_addr, 'ptype': 'socks5'}
                 host, status = self.check_proxy(socks_proxy)
