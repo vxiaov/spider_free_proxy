@@ -35,6 +35,7 @@ if __name__ == '__main__':
 ua = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'
 js0 = '''() =>{Object.defineProperty(navigator, 'webdriver', {get: () => undefined });}'''
 
+all_support_proxy_types = ['ss', 'ssr', 'v2ray']
 
 def format_ss_json(ss_list):
     '''
@@ -175,6 +176,34 @@ def decode_vmess_uri(vmess_uri):
         vmess['tls'] = dec_info.get('tls', "")
         return vmess
 
+def decode_trojan_uri(uri):
+    '''
+    解析uri , 只返回元组信息,字段位置可能不固定
+    params:
+        uri : 以 trojan://开头的字符串
+        password@server:server_port
+    '''
+    if uri.startswith('trojan://'):
+        res = urlparse(unquote(uri))
+        netloc = res.netloc.split('@')
+        plugin = parse_qs(res.query)
+        if len(netloc) > 1:
+            password = netloc[0]
+            ip, port = netloc[1].split(':')
+            port = int(port)
+        else:
+            ss_uri = base64.b64decode(b64pading(netloc[0])).decode()
+            s1 = ss_uri.split('@', maxsplit=1)
+            s2 = s1[1].rsplit(':', maxsplit=1)
+            password = s1[0]
+            ip = s2[0]
+            port = int(s2[1])
+        conf = {}
+        conf['server'] = ip
+        conf['server_port'] = port
+        conf['password'] = password
+        return conf
+
 
 def decode_uri(uri):
     '''解析所有类型URI'''
@@ -204,6 +233,7 @@ def load_config(conf_file):
     conf['ss_cmd'] = config['socks_client']['ss_cmd']
     conf['ssr_cmd'] = config['socks_client']['ssr_cmd']
     conf['v2ray_cmd'] = config['socks_client']['v2ray_cmd']
+    
     conf['port_start'] = int(config['socks_client']['port_start'])
     conf['port_num'] = config['socks_client']['port_num'].split(',')
 
@@ -276,7 +306,7 @@ class spider_proxy(object):
         self.getter_table_web = 'getter_web_set'
 
         # ptype: 直接提供的服务: http/socks4/socks5
-        for ptype in ['ss', 'ssr', 'v2ray', 'proxy']:
+        for ptype in all_support_proxy_types:
             self.stable[ptype] = ptype + '_table'
             self.rtable[ptype] = ptype + '_working'
             if ptype == 'ss':
@@ -594,7 +624,7 @@ class spider_proxy(object):
             p = ctx.Process(name=_.decode(), target=os.system(cmd))
             p.start()
             if p:
-                if ptype == 'v2ray':
+                if ptype in ['v2ray']:
                     time.sleep(0.5)  # 等待服务启动过程 #
                 socks_addr = local_addr + str(local_port)
                 socks_proxy = {'host': socks_addr, 'ptype': 'socks5'}
@@ -632,7 +662,7 @@ class spider_proxy(object):
 
         ptype_list = [ptype, ]
         if ptype == 'all':
-            ptype_list = ['ss', 'ssr', 'v2ray']
+            ptype_list = all_support_proxy_types
         proc_list = {}
         for ptype in ptype_list:
             p = ctx.Process(name='proc-{}'.format(ptype), target=self.start_check_socks5, args=(ptype, ))
@@ -790,7 +820,7 @@ class spider_proxy(object):
         await self.browser.close()
         return
 
-    def get_proxy_from_rss_uri(self):
+    def get_proxy_from_rss_uri(self, ptype="all"):
         '''
         免费订阅源: ss/ssr/vmess base64 uri
         功能:
@@ -802,8 +832,6 @@ class spider_proxy(object):
             'https': f'{socks_server}'
         }
         order_ssr_list = self.redis.smembers(self.getter_table_uri)
-        print("DEBUG:redis_set:", len(order_ssr_list))
-
         ssr_list = []
         ss_list = []
         vmess_list = []
@@ -838,7 +866,7 @@ class spider_proxy(object):
                         item = decode_ssr_uri(data)
                         ssr_list.append(item)
                 except Exception as e:
-                    self.log_queue.put(log_exc(EXECPTION, str(e)))
+                    self.log_queue.put(log_exc(EXECPTION, f'data:{data}, EXCEPTION:{str(e)}'))
                     continue
         # 存储代理信息
         self.save_to_redis(ss_list, ptype='ss')
@@ -939,7 +967,7 @@ class spider_proxy(object):
                 return False
             nonce = nonce[0]
             payload['nonce'] = nonce
-            for ptype in ['ss', 'ssr', 'v2ray']:
+            for ptype in all_support_proxy_types:
                 payload['post_id'] = post_id[ptype]
                 resp = requests.post(url_api, proxies=proxies, headers=headers, data=payload)
                 self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {resp.url}'))
@@ -972,6 +1000,8 @@ class spider_proxy(object):
                                 socks_list.append(item)
                             except Exception as e:
                                 self.log_queue.put(log_exc(EXECPTION, str(e)))
+                    else:
+                        self.log_queue.put(log_exc(WARNING, f"no proxy type:[{ptype}] need to decode."))
                     self.save_to_redis(socks_list, ptype=ptype)
             return True
         except requests.exceptions.ConnectionError as e:
@@ -980,7 +1010,7 @@ class spider_proxy(object):
             self.log_queue.put(log_exc(EXECPTION, str(e)))
         return False
 
-    def get_proxy_from_url(self):
+    def get_proxy_from_url(self, ptype="all"):
         '''
         Web页面爬取 ss/ssr/v2ray base64 encoded url
         提取类型:
@@ -993,6 +1023,7 @@ class spider_proxy(object):
         }
         try:
             start_urls = self.redis.smembers(self.getter_table_web)
+            
             ss_list = []
             ssr_list = []
             v2ray_list = []
@@ -1134,14 +1165,14 @@ class spider_proxy(object):
         爬取所有代理信息: 包括ss/ssr/v2ray
         '''
         if ptype in ['test']:
-            # self.get_proxy_from_url()
+            self.get_proxy_from_rss_uri("test")
             # self.get_proxy_from_rss_json()
-            self.get_proxy_from_tg()
+            # self.get_proxy_from_tg()
 
         if ptype in ['ss', 'all']:
             self.get_proxy_ss_pythonic()
 
-        if ptype in ['ss', 'ssr', 'v2ray', 'all']:
+        if ptype == 'all' or ptype in all_support_proxy_types:
             self.get_proxy_youneedwin()
             self.get_proxy_from_rss_uri()
             self.get_proxy_from_rss_json()
@@ -1174,7 +1205,7 @@ class spider_proxy(object):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser('代理爬取工具')
-    proxy_types = ['all', 'ss', 'ssr', 'v2ray', 'proxy', 'test']
+    proxy_types = ['all', 'proxy', 'test'] + all_support_proxy_types
 
     parser.add_argument('-i', '--init', default='config.ini', help='运行初始化配置文件')
     parser.add_argument('-c', '--check', default=None, choices=proxy_types, help='运行代理可用性检测器')
