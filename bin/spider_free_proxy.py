@@ -537,7 +537,7 @@ class spider_proxy(object):
 
     def start_check_socks5(self, ptype='ss'):
         '''
-        检查socks5代理
+        检查socks5代理可用性： 启动代理、检查代理、重启代理
         params:
             ptype: ss/ssr
         '''
@@ -716,11 +716,16 @@ class spider_proxy(object):
             v = pr_dict[k]
             k = ip + ':' + port
             v['server'] = ip    # 替换域名, 存储IP地址
-            v = json.dumps(v)
+            
             if self.redis.hexists(htable, k):
                 doer += 1
                 continue
-            self.redis.hset(htable, k, v)
+            vdump = json.dumps(v)
+            self.redis.hset(htable, k, vdump)
+            if ptype == 'ss':
+                # 暂时方案: 保存两份ss信息
+                if v['method'] in [ "chacha20-ietf-poly1305", "aes-256-gcm", "aes-128-gcm" , "AEAD_CHACHA20_POLY1305", "AEAD_AES_256_GCM", "AEAD_AES_128_GCM"]:
+                    self.redis.hset("ss2_table", k, vdump)
             count += 1
 
         # 入库日志

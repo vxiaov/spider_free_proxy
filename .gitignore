@@ -6,3 +6,5 @@ running/
 chrome_profile/
 log/
 github/
+move_log.sh
+flag.list
