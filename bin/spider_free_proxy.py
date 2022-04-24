@@ -35,7 +35,7 @@ if __name__ == '__main__':
 ua = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.116 Safari/537.36'
 js0 = '''() =>{Object.defineProperty(navigator, 'webdriver', {get: () => undefined });}'''
 
-all_support_proxy_types = ['ss', 'ssr', 'v2ray']
+all_support_proxy_types = ['ss', 'ss2', 'ssr', 'v2ray']
 
 def format_ss_json(ss_list):
     '''
@@ -231,9 +231,10 @@ def load_config(conf_file):
         return None
     conf['conf_dir'] = config['socks_client']['conf_dir']
     conf['ss_cmd'] = config['socks_client']['ss_cmd']
+    conf['ss2_cmd'] = config['socks_client']['ss2_cmd']
     conf['ssr_cmd'] = config['socks_client']['ssr_cmd']
     conf['v2ray_cmd'] = config['socks_client']['v2ray_cmd']
-    
+
     conf['port_start'] = int(config['socks_client']['port_start'])
     conf['port_num'] = config['socks_client']['port_num'].split(',')
 
@@ -290,9 +291,10 @@ class spider_proxy(object):
         self.redis = StrictRedis.from_url(redis_uri)
         self.max_num = {}
         self.max_num['ss'] = int(config['port_num'][0])
-        self.max_num['ssr'] = int(config['port_num'][1])
-        self.max_num['v2ray'] = int(config['port_num'][2])
-        self.max_port = int(self.max_num['ss']) + int(self.max_num['ssr']) + int(self.max_num['v2ray'])   # 分配端口总数
+        self.max_num['ss2'] = int(config['port_num'][1])
+        self.max_num['ssr'] = int(config['port_num'][2])
+        self.max_num['v2ray'] = int(config['port_num'][3])
+        self.max_port = int(self.max_num['ss']) + int(self.max_num['ss2']) + int(self.max_num['ssr']) + int(self.max_num['v2ray'])   # 分配端口总数
         self.port_start = config['port_start']
 
         # Redis存储
@@ -312,12 +314,15 @@ class spider_proxy(object):
             if ptype == 'ss':
                 self.prog[ptype] = config['ss_cmd']
                 self.port[ptype] = self.port_start
+            if ptype == 'ss2':
+                self.prog[ptype] = config['ss2_cmd']
+                self.port[ptype] = self.port_start + int(self.max_num['ss'])
             elif ptype == 'ssr':
                 self.prog[ptype] = config['ssr_cmd']
-                self.port[ptype] = self.port_start + int(self.max_num['ss'])
+                self.port[ptype] = self.port_start + int(self.max_num['ss']) + int(self.max_num['ss2'])
             elif ptype == 'v2ray':
                 self.prog[ptype] = config['v2ray_cmd']
-                self.port[ptype] = self.port_start + int(self.max_num['ss']) + int(self.max_num['ssr'])
+                self.port[ptype] = self.port_start + int(self.max_num['ss']) + int(self.max_num['ss2']) + int(self.max_num['ssr'])
         self.check_url = config['check_url']
         self.max_proc = int(config['max_proc'])
         self.sleep_checker = int(config['sleep_checker'])
@@ -373,6 +378,8 @@ class spider_proxy(object):
         try:
             if ptype in ['ssr']:
                 res = f'{prog} -d -c {conffile}'
+            elif ptype == 'ss2':
+                res = f'{prog} -c ss://{conf["method"]}:{conf["password"]}@{conf["server"]}:{conf["server_port"]} -socks :{conf["local_port"]}'
             elif ptype in ['ss']:
                 res = f'{prog} -c {conffile}'
                 if conf.get('plugin', None):
@@ -411,7 +418,7 @@ class spider_proxy(object):
             f.write(json.dumps(conf, sort_keys=True, indent=4))
 
         res = self.get_cmd(ptype=ptype, conf=params)
-        if ptype in ['ss', 'v2ray']:
+        if ptype in ['ss', 'ss2', 'v2ray']:
             # v2ray 命令无守护模式
             res = f'nohup {res} >/dev/null 2>&1 &'
         return res
@@ -425,7 +432,7 @@ class spider_proxy(object):
             IP, port , status
             status 为True时表示TCP端口可以连接，但并不代表socks5服务就可用
         '''
-        socket.setdefaulttimeout(0.8)       # 设置默认TCP连接阻塞超时时间
+        socket.setdefaulttimeout(0.5)       # 设置默认TCP连接阻塞超时时间
         addr = host.rsplit(':', maxsplit=1)
         port = addr[1]
         sock = None
@@ -623,8 +630,9 @@ class spider_proxy(object):
 
             p = ctx.Process(name=_.decode(), target=os.system(cmd))
             p.start()
+            time.sleep(0.5)
             if p:
-                if ptype in ['v2ray']:
+                if ptype in ['v2ray', 'ss2']:
                     time.sleep(0.5)  # 等待服务启动过程 #
                 socks_addr = local_addr + str(local_port)
                 socks_proxy = {'host': socks_addr, 'ptype': 'socks5'}
@@ -716,7 +724,7 @@ class spider_proxy(object):
             v = pr_dict[k]
             k = ip + ':' + port
             v['server'] = ip    # 替换域名, 存储IP地址
-            
+
             if self.redis.hexists(htable, k):
                 doer += 1
                 continue
@@ -973,6 +981,8 @@ class spider_proxy(object):
             nonce = nonce[0]
             payload['nonce'] = nonce
             for ptype in all_support_proxy_types:
+                if ptype == 'ss2':
+                    continue
                 payload['post_id'] = post_id[ptype]
                 resp = requests.post(url_api, proxies=proxies, headers=headers, data=payload)
                 self.log_queue.put(log_exc(INFO, f'{resp.status_code}, {resp.url}'))
@@ -1028,7 +1038,7 @@ class spider_proxy(object):
         }
         try:
             start_urls = self.redis.smembers(self.getter_table_web)
-            
+
             ss_list = []
             ssr_list = []
             v2ray_list = []
